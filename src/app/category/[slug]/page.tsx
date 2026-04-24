@@ -69,17 +69,11 @@ export default function CategoryDetailPage() {
     if (!userId) return
     setLoading(true)
     try {
-      // Fetch all categories to find the one matching the slug
-      const res = await apiFetch('/api/categories')
-      if (!res.ok) throw new Error('Failed to fetch categories')
-      const categories: Category[] = await res.json()
-      const found = categories.find((c) => c.slug === slug)
-      if (!found) {
+      const detailRes = await apiFetch(`/api/categories/slug/${slug}`)
+      if (detailRes.status === 404) {
         router.push('/')
         return
       }
-      // Fetch full detail
-      const detailRes = await apiFetch(`/api/categories/${found.id}`)
       if (!detailRes.ok) throw new Error('Failed to fetch category detail')
       const detail: CategoryDetail = await detailRes.json()
       setCategory(detail)

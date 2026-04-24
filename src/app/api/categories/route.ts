@@ -21,20 +21,29 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  // Get prompt and image counts for each category
-  const enriched = await Promise.all(
-    (categories || []).map(async (cat) => {
-      const [promptRes, imageRes] = await Promise.all([
-        supabase.from('category_prompts').select('id', { count: 'exact', head: true }).eq('category_id', cat.id),
-        supabase.from('category_images').select('id', { count: 'exact', head: true }).eq('category_id', cat.id),
+  const categoryIds = (categories || []).map((cat) => cat.id)
+  const [promptRes, imageRes] = categoryIds.length > 0
+    ? await Promise.all([
+        supabase.from('category_prompts').select('category_id').in('category_id', categoryIds),
+        supabase.from('category_images').select('category_id').in('category_id', categoryIds),
       ])
-      return {
-        ...cat,
-        prompt_count: promptRes.count ?? 0,
-        image_count: imageRes.count ?? 0,
-      }
-    })
-  )
+    : [{ data: [] }, { data: [] }]
+
+  const promptCounts = new Map<string, number>()
+  for (const prompt of promptRes.data || []) {
+    promptCounts.set(prompt.category_id, (promptCounts.get(prompt.category_id) || 0) + 1)
+  }
+
+  const imageCounts = new Map<string, number>()
+  for (const image of imageRes.data || []) {
+    imageCounts.set(image.category_id, (imageCounts.get(image.category_id) || 0) + 1)
+  }
+
+  const enriched = (categories || []).map((cat) => ({
+    ...cat,
+    prompt_count: promptCounts.get(cat.id) || 0,
+    image_count: imageCounts.get(cat.id) || 0,
+  }))
 
   return NextResponse.json(enriched)
 }

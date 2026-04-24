@@ -17,60 +17,51 @@ export async function ensurePresetCategoriesForUser(
   const existingBySlug = new Map(
     (existingCategories || []).map((category) => [category.slug, category.id])
   )
+  const missingPresets = PRESET_CATEGORIES.filter((preset) => !existingBySlug.has(preset.slug))
 
-  for (let index = 0; index < PRESET_CATEGORIES.length; index++) {
-    const preset = PRESET_CATEGORIES[index]
-    let categoryId = existingBySlug.get(preset.slug)
+  if (missingPresets.length === 0) {
+    return
+  }
 
-    if (!categoryId) {
-      const { data: category, error: categoryError } = await supabase
-        .from('categories')
-        .insert({
-          user_id: userId,
-          name_zh: preset.name_zh,
-          slug: preset.slug,
-          icon: preset.icon,
-          sort_order: index,
-          is_preset: true,
-        })
-        .select('id')
-        .single()
+  const rows = missingPresets.map((preset) => ({
+    user_id: userId,
+    name_zh: preset.name_zh,
+    slug: preset.slug,
+    icon: preset.icon,
+    sort_order: PRESET_CATEGORIES.findIndex((category) => category.slug === preset.slug),
+    is_preset: true,
+  }))
 
-      if (categoryError) {
-        throw categoryError
-      }
+  const { data: insertedCategories, error: categoryError } = await supabase
+    .from('categories')
+    .insert(rows)
+    .select('id, slug')
 
-      categoryId = category.id
-    }
+  if (categoryError) {
+    throw categoryError
+  }
 
-    const { data: existingPrompts, error: promptReadError } = await supabase
-      .from('category_prompts')
-      .select('prompt_number')
-      .eq('category_id', categoryId)
+  const insertedBySlug = new Map(
+    (insertedCategories || []).map((category) => [category.slug, category.id])
+  )
+  const promptRows = missingPresets.flatMap((preset) => {
+    const categoryId = insertedBySlug.get(preset.slug)
+    if (!categoryId) return []
 
-    if (promptReadError) {
-      throw promptReadError
-    }
-
-    const existingPromptNumbers = new Set(
-      (existingPrompts || []).map((prompt) => prompt.prompt_number)
-    )
-    const missingPrompts = preset.prompts
-      .filter((prompt) => !existingPromptNumbers.has(prompt.prompt_number))
-      .map((prompt) => ({
-        category_id: categoryId,
+    return preset.prompts.map((prompt) => ({
+      category_id: categoryId,
         prompt_number: prompt.prompt_number,
         prompt_text: prompt.prompt_text,
-      }))
+    }))
+  })
 
-    if (missingPrompts.length > 0) {
-      const { error: promptInsertError } = await supabase
-        .from('category_prompts')
-        .insert(missingPrompts)
+  if (promptRows.length > 0) {
+    const { error: promptInsertError } = await supabase
+      .from('category_prompts')
+      .insert(promptRows)
 
-      if (promptInsertError) {
-        throw promptInsertError
-      }
+    if (promptInsertError) {
+      throw promptInsertError
     }
   }
 }
