@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedUser, getRequestSupabase } from '@/lib/supabase'
+import { readBuiltinGeminiApiKey } from '@/lib/gemini-settings'
 
 export async function POST(request: NextRequest) {
   const supabase = getRequestSupabase(request)
@@ -22,6 +23,12 @@ export async function POST(request: NextRequest) {
 
   if (password !== accessPassword) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 403 })
+  }
+
+  if (!readBuiltinGeminiApiKey()) {
+    return NextResponse.json({
+      error: 'Built-in Gemini API key is missing or invalid. Set BUILTIN_GEMINI_API_KEY to a valid AIza... key in Vercel.',
+    }, { status: 500 })
   }
 
   // Password matches - update settings

@@ -34,3 +34,20 @@ export function encodeStoredGeminiSettings(settings: StoredGeminiSettings) {
 export function isValidGeminiApiKey(apiKey: string | null | undefined) {
   return typeof apiKey === 'string' && apiKey.startsWith('AIza') && apiKey.length >= 30
 }
+
+export function readBuiltinGeminiApiKey() {
+  const configured = process.env.BUILTIN_GEMINI_API_KEY?.trim()
+  if (!configured) return null
+
+  if (isValidGeminiApiKey(configured)) {
+    return configured
+  }
+
+  try {
+    const decoded = Buffer.from(configured, 'base64').toString('utf-8')
+    const reversed = decoded.split('').reverse().join('')
+    return isValidGeminiApiKey(reversed) ? reversed : null
+  } catch {
+    return null
+  }
+}

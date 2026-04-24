@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedUser, getRequestSupabase } from '@/lib/supabase'
 import { cancelGeminiBatch, decodeBatchMeta } from '@/lib/gemini-batch'
-import { parseStoredGeminiSettings } from '@/lib/gemini-settings'
+import { parseStoredGeminiSettings, readBuiltinGeminiApiKey } from '@/lib/gemini-settings'
 
 async function getGeminiApiKey(supabase: ReturnType<typeof getRequestSupabase>, userId: string) {
   const { data: settings } = await supabase
@@ -13,10 +13,7 @@ async function getGeminiApiKey(supabase: ReturnType<typeof getRequestSupabase>, 
   if (!settings) return null
 
   if (settings.use_builtin_key && settings.builtin_key_password_verified) {
-    const encoded = process.env.BUILTIN_GEMINI_API_KEY
-    if (!encoded) return null
-    const decoded = Buffer.from(encoded, 'base64').toString('utf-8')
-    return decoded.split('').reverse().join('')
+    return readBuiltinGeminiApiKey()
   }
 
   return parseStoredGeminiSettings(settings.gemini_api_key_encrypted).apiKey || null

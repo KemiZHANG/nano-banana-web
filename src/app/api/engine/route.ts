@@ -11,7 +11,7 @@ import {
   getGeminiBatch,
   uploadBatchInputFile,
 } from '@/lib/gemini-batch'
-import { GenerationMode, isValidGeminiApiKey, parseStoredGeminiSettings } from '@/lib/gemini-settings'
+import { GenerationMode, isValidGeminiApiKey, parseStoredGeminiSettings, readBuiltinGeminiApiKey } from '@/lib/gemini-settings'
 
 export const maxDuration = 300
 
@@ -51,10 +51,7 @@ async function getGeminiSettings(
   const generationMode = stored.generationMode || 'batch'
 
   if (settings.use_builtin_key && settings.builtin_key_password_verified) {
-    const encoded = process.env.BUILTIN_GEMINI_API_KEY
-    if (!encoded) return { apiKey: null, generationMode }
-    const decoded = Buffer.from(encoded, 'base64').toString('utf-8')
-    return { apiKey: decoded.split('').reverse().join(''), generationMode }
+    return { apiKey: readBuiltinGeminiApiKey(), generationMode }
   }
 
   return { apiKey: stored.apiKey || null, generationMode }
