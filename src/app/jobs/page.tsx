@@ -58,6 +58,7 @@ export default function JobsPage() {
   const [cancelling, setCancelling] = useState<string | null>(null)
   const [confirmJobId, setConfirmJobId] = useState<string | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const syncingRef = useRef(false)
 
   // Auth check
   useEffect(() => {
@@ -71,17 +72,43 @@ export default function JobsPage() {
   }, [router])
 
   // Fetch jobs list
-  const fetchJobs = useCallback(async () => {
+  const syncActiveEngines = useCallback(async (activeJobs: Job[]) => {
+    if (syncingRef.current || activeJobs.length === 0) return
+    syncingRef.current = true
+    try {
+      await Promise.all(
+        activeJobs.map((job) =>
+          apiFetch('/api/engine', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: job.id }),
+          }).catch(() => null)
+        )
+      )
+    } finally {
+      syncingRef.current = false
+    }
+  }, [])
+
+  const fetchJobs = useCallback(async (syncEngine = true) => {
     try {
       const res = await apiFetch('/api/jobs')
       if (res.ok) {
         const data = await res.json()
         setJobs(data)
+        const activeJobs = data.filter((job: Job) => job.status === 'running' || job.status === 'queued')
+        if (syncEngine && activeJobs.length > 0) {
+          await syncActiveEngines(activeJobs)
+          const refreshed = await apiFetch('/api/jobs')
+          if (refreshed.ok) {
+            setJobs(await refreshed.json())
+          }
+        }
       }
     } catch {
       // silent
     }
-  }, [])
+  }, [syncActiveEngines])
 
   useEffect(() => {
     if (!loading) {

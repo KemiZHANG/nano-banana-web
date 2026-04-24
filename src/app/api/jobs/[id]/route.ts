@@ -1,5 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedUser, getRequestSupabase } from '@/lib/supabase'
+import { cancelGeminiBatch, decodeBatchMeta } from '@/lib/gemini-batch'
+import { parseStoredGeminiSettings } from '@/lib/gemini-settings'
+
+async function getGeminiApiKey(supabase: ReturnType<typeof getRequestSupabase>, userId: string) {
+  const { data: settings } = await supabase
+    .from('system_settings')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (!settings) return null
+
+  if (settings.use_builtin_key && settings.builtin_key_password_verified) {
+    const encoded = process.env.BUILTIN_GEMINI_API_KEY
+    if (!encoded) return null
+    const decoded = Buffer.from(encoded, 'base64').toString('utf-8')
+    return decoded.split('').reverse().join('')
+  }
+
+  return parseStoredGeminiSettings(settings.gemini_api_key_encrypted).apiKey || null
+}
 
 export async function GET(
   request: NextRequest,
@@ -70,6 +91,14 @@ export async function DELETE(
 
   if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
     return NextResponse.json({ error: 'Job is already finished' }, { status: 400 })
+  }
+
+  const batchMeta = decodeBatchMeta(job.error_message)
+  if (batchMeta) {
+    const apiKey = await getGeminiApiKey(supabase, user.id)
+    if (apiKey) {
+      await cancelGeminiBatch(apiKey, batchMeta.batchName).catch(() => null)
+    }
   }
 
   // Cancel pending items

@@ -15,6 +15,7 @@ export default function SettingsPage() {
 
   // API Key section
   const [keyMode, setKeyMode] = useState<'builtin' | 'own'>('own')
+  const [generationMode, setGenerationMode] = useState<'batch' | 'direct'>('batch')
   const [password, setPassword] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [verifying, setVerifying] = useState(false)
@@ -44,6 +45,7 @@ export default function SettingsPage() {
         const data = await settingsRes.json()
         setSettings(data)
         setKeyMode(data.use_builtin_key ? 'builtin' : 'own')
+        setGenerationMode(data.generation_mode === 'direct' ? 'direct' : 'batch')
       }
 
       if (userRes.data.user) {
@@ -92,6 +94,32 @@ export default function SettingsPage() {
       setKeyMessage({ type: 'error', text: '网络错误，请重试' })
     } finally {
       setVerifying(false)
+    }
+  }
+
+  const handleGenerationModeChange = async (mode: 'batch' | 'direct') => {
+    setGenerationMode(mode)
+    setKeyMessage(null)
+    try {
+      const res = await apiFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ generation_mode: mode }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setSettings(data)
+        setKeyMessage({
+          type: 'success',
+          text: mode === 'batch'
+            ? '已切换为 Batch 半价模式'
+            : '已切换为普通即时模式',
+        })
+      } else {
+        setKeyMessage({ type: 'error', text: data.error || '保存生成模式失败' })
+      }
+    } catch {
+      setKeyMessage({ type: 'error', text: '网络错误，请重试' })
     }
   }
 
@@ -274,18 +302,50 @@ export default function SettingsPage() {
 
           {/* Section 2: Current Mode */}
           <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-base font-semibold text-gray-900">当前模式</h3>
-            <div className="rounded-md border border-blue-200 bg-blue-50 p-4">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
-                <span className="text-sm font-medium text-blue-800">Direct API Mode (Gemini)</span>
-              </div>
-              <p className="mt-2 text-sm text-blue-700">
-                当前使用 Gemini Direct API 模式进行图片生成。
-              </p>
+            <h3 className="mb-4 text-base font-semibold text-gray-900">生成模式</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className={`cursor-pointer rounded-md border p-4 transition-colors ${
+                generationMode === 'batch'
+                  ? 'border-blue-300 bg-blue-50'
+                  : 'border-gray-200 bg-white hover:bg-gray-50'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="generationMode"
+                    checked={generationMode === 'batch'}
+                    onChange={() => handleGenerationModeChange('batch')}
+                    className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-gray-900">Batch 半价模式</span>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-gray-500">
+                  使用 Gemini Batch API，价格约为普通模式 50%，适合批量出图；完成时间通常更久，官方目标最长可到 24 小时。
+                </p>
+              </label>
+
+              <label className={`cursor-pointer rounded-md border p-4 transition-colors ${
+                generationMode === 'direct'
+                  ? 'border-blue-300 bg-blue-50'
+                  : 'border-gray-200 bg-white hover:bg-gray-50'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="generationMode"
+                    checked={generationMode === 'direct'}
+                    onChange={() => handleGenerationModeChange('direct')}
+                    className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-gray-900">普通即时模式</span>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-gray-500">
+                  使用 Gemini 2.5 Flash Image 普通 API，适合少量图片或需要尽快看到结果的任务。
+                </p>
+              </label>
             </div>
             <p className="mt-3 text-xs text-gray-400">
-              Workflow Mode (n8n) 将在未来版本支持
+              当前模型：Nano Banana / Gemini 2.5 Flash Image
             </p>
           </div>
 

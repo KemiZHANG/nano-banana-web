@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedUser, getRequestSupabase } from '@/lib/supabase'
+import { encodeStoredGeminiSettings, parseStoredGeminiSettings } from '@/lib/gemini-settings'
+
+function withGenerationMode<T extends { gemini_api_key_encrypted: string | null }>(settings: T) {
+  const stored = parseStoredGeminiSettings(settings.gemini_api_key_encrypted)
+  return {
+    ...settings,
+    gemini_api_key_encrypted: stored.apiKey || null,
+    generation_mode: stored.generationMode || 'batch',
+  }
+}
 
 export async function GET(request: NextRequest) {
   const supabase = getRequestSupabase(request)
@@ -35,10 +45,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: createError.message }, { status: 500 })
     }
 
-    return NextResponse.json(newSettings)
+    return NextResponse.json(withGenerationMode(newSettings))
   }
 
-  return NextResponse.json(settings)
+  return NextResponse.json(withGenerationMode(settings))
 }
 
 export async function PUT(request: NextRequest) {
@@ -49,12 +59,23 @@ export async function PUT(request: NextRequest) {
   }
 
   const body = await request.json()
-  const { gemini_api_key, use_builtin_key, builtin_key_password_verified } = body
+  const { gemini_api_key, use_builtin_key, builtin_key_password_verified, generation_mode } = body
 
   const updateData: Record<string, unknown> = {}
 
-  if (gemini_api_key !== undefined) {
-    updateData.gemini_api_key_encrypted = gemini_api_key
+  const { data: existingSettings } = await supabase
+    .from('system_settings')
+    .select('*')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  const currentStored = parseStoredGeminiSettings(existingSettings?.gemini_api_key_encrypted)
+
+  if (gemini_api_key !== undefined || generation_mode !== undefined) {
+    updateData.gemini_api_key_encrypted = encodeStoredGeminiSettings({
+      apiKey: gemini_api_key !== undefined ? gemini_api_key : currentStored.apiKey,
+      generationMode: generation_mode === 'direct' ? 'direct' : currentStored.generationMode || 'batch',
+    })
   }
   if (use_builtin_key !== undefined) {
     updateData.use_builtin_key = use_builtin_key
@@ -68,14 +89,8 @@ export async function PUT(request: NextRequest) {
   }
 
   // Upsert settings
-  const { data: existing } = await supabase
-    .from('system_settings')
-    .select('id')
-    .eq('user_id', user.id)
-    .maybeSingle()
-
   let result
-  if (existing) {
+  if (existingSettings) {
     result = await supabase
       .from('system_settings')
       .update(updateData)
@@ -97,5 +112,5 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: result.error.message }, { status: 500 })
   }
 
-  return NextResponse.json(result.data)
+  return NextResponse.json(withGenerationMode(result.data))
 }
