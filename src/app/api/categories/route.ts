@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedUser, getServerSupabase } from '@/lib/supabase'
+import { ensurePresetCategoriesForUser } from '@/lib/preset-seed'
 
 export async function GET(request: NextRequest) {
   const supabase = getServerSupabase()
@@ -7,6 +8,8 @@ export async function GET(request: NextRequest) {
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  await ensurePresetCategoriesForUser(supabase, user.id)
 
   const { data: categories, error } = await supabase
     .from('categories')
