@@ -71,9 +71,18 @@ export async function PUT(request: NextRequest) {
 
   const currentStored = parseStoredGeminiSettings(existingSettings?.gemini_api_key_encrypted)
 
+  if (gemini_api_key !== undefined) {
+    const trimmedKey = String(gemini_api_key).trim()
+    if (!trimmedKey.startsWith('AIza') || trimmedKey.length < 30) {
+      return NextResponse.json({
+        error: '请输入有效的 Gemini API Key。Google AI Studio 的 key 通常以 AIza 开头。',
+      }, { status: 400 })
+    }
+  }
+
   if (gemini_api_key !== undefined || generation_mode !== undefined) {
     updateData.gemini_api_key_encrypted = encodeStoredGeminiSettings({
-      apiKey: gemini_api_key !== undefined ? gemini_api_key : currentStored.apiKey,
+      apiKey: gemini_api_key !== undefined ? String(gemini_api_key).trim() : currentStored.apiKey,
       generationMode: generation_mode === 'direct' ? 'direct' : currentStored.generationMode || 'batch',
     })
   }

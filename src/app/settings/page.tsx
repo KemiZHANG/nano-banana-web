@@ -125,8 +125,13 @@ export default function SettingsPage() {
 
   // Save own API key
   const handleSaveApiKey = async () => {
-    if (!apiKey.trim()) {
+    const trimmedKey = apiKey.trim()
+    if (!trimmedKey) {
       setKeyMessage({ type: 'error', text: '请输入 API Key' })
+      return
+    }
+    if (!trimmedKey.startsWith('AIza') || trimmedKey.length < 30) {
+      setKeyMessage({ type: 'error', text: '这不像有效的 Gemini API Key。Google AI Studio 的 key 通常以 AIza 开头。' })
       return
     }
     setSaving(true)
@@ -136,7 +141,7 @@ export default function SettingsPage() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          gemini_api_key: apiKey,
+          gemini_api_key: trimmedKey,
           use_builtin_key: false,
         }),
       })
