@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { isAdminEmail } from '@/lib/admin'
 
 const NAV_LINKS = [
   { href: '/', label: 'Dashboard' },
@@ -16,6 +17,9 @@ export default function Navbar() {
   const pathname = usePathname()
   const router = useRouter()
   const [userEmail, setUserEmail] = useState<string | null>(null)
+  const visibleLinks = isAdminEmail(userEmail)
+    ? [...NAV_LINKS, { href: '/admin/authorized-emails', label: 'Admin' }]
+    : NAV_LINKS
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -39,7 +43,7 @@ export default function Navbar() {
             <span>Nano Banana</span>
           </Link>
           <div className="hidden items-center gap-1 sm:flex">
-            {NAV_LINKS.map((link) => {
+            {visibleLinks.map((link) => {
               const isActive =
                 link.href === '/'
                   ? pathname === '/'
@@ -79,7 +83,7 @@ export default function Navbar() {
 
       {/* Mobile nav links */}
       <div className="flex gap-1 overflow-x-auto border-t border-gray-100 px-4 py-1 sm:hidden">
-        {NAV_LINKS.map((link) => {
+        {visibleLinks.map((link) => {
           const isActive =
             link.href === '/'
               ? pathname === '/'

@@ -1,19 +1,17 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
-import { apiFetch } from '@/lib/api'
-import type { SystemSettings, Profile } from '@/lib/types'
 import Navbar from '@/components/Navbar'
+import { apiFetch } from '@/lib/api'
+import { supabase } from '@/lib/supabase'
+import type { Profile, SystemSettings } from '@/lib/types'
 
 export default function SettingsPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [settings, setSettings] = useState<SystemSettings | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-
-  // API Key section
   const [keyMode, setKeyMode] = useState<'builtin' | 'own'>('own')
   const [generationMode, setGenerationMode] = useState<'batch' | 'direct'>('batch')
   const [password, setPassword] = useState('')
@@ -22,58 +20,47 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [keyMessage, setKeyMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  // Auth check
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (!data.user) {
-        router.replace('/login')
-      } else {
-        setLoading(false)
-      }
-    })
-  }, [router])
-
-  // Fetch settings and profile
   const fetchData = useCallback(async () => {
-    try {
-      const [settingsRes, userRes] = await Promise.all([
-        apiFetch('/api/settings'),
-        supabase.auth.getUser(),
-      ])
+    const [settingsRes, userRes] = await Promise.all([
+      apiFetch('/api/settings'),
+      supabase.auth.getUser(),
+    ])
 
-      if (settingsRes.ok) {
-        const data = await settingsRes.json()
-        setSettings(data)
-        setKeyMode(data.use_builtin_key ? 'builtin' : 'own')
-        setGenerationMode(data.generation_mode === 'direct' ? 'direct' : 'batch')
-      }
+    if (settingsRes.ok) {
+      const data = await settingsRes.json()
+      setSettings(data)
+      setKeyMode(data.use_builtin_key || data.builtin_key_email_authorized ? 'builtin' : 'own')
+      setGenerationMode(data.generation_mode === 'direct' ? 'direct' : 'batch')
+    }
 
-      if (userRes.data.user) {
-        setProfile({
-          id: userRes.data.user.id,
-          email: userRes.data.user.email ?? null,
-          display_name: userRes.data.user.user_metadata?.display_name ?? null,
-          created_at: userRes.data.user.created_at,
-          updated_at: userRes.data.user.updated_at ?? userRes.data.user.created_at,
-        })
-      }
-    } catch {
-      // silent
+    if (userRes.data.user) {
+      setProfile({
+        id: userRes.data.user.id,
+        email: userRes.data.user.email ?? null,
+        display_name: userRes.data.user.user_metadata?.display_name ?? null,
+        created_at: userRes.data.user.created_at,
+        updated_at: userRes.data.user.updated_at ?? userRes.data.user.created_at,
+      })
     }
   }, [])
 
   useEffect(() => {
-    if (!loading) {
-      fetchData()
-    }
-  }, [loading, fetchData])
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (!data.user) {
+        router.replace('/login')
+        return
+      }
+      await fetchData()
+      setLoading(false)
+    })
+  }, [fetchData, router])
 
-  // Verify built-in key password
   const handleVerifyBuiltin = async () => {
     if (!password.trim()) {
-      setKeyMessage({ type: 'error', text: '请输入密码' })
+      setKeyMessage({ type: 'error', text: '请输入访问密码。' })
       return
     }
+
     setVerifying(true)
     setKeyMessage(null)
     try {
@@ -83,15 +70,14 @@ export default function SettingsPage() {
         body: JSON.stringify({ password }),
       })
       const data = await res.json()
-      if (res.ok) {
-        setKeyMessage({ type: 'success', text: '验证成功，已切换为内置 Key 模式' })
-        setPassword('')
-        await fetchData()
-      } else {
+      if (!res.ok) {
         setKeyMessage({ type: 'error', text: data.error || '验证失败' })
+        return
       }
-    } catch {
-      setKeyMessage({ type: 'error', text: '网络错误，请重试' })
+
+      setPassword('')
+      setKeyMessage({ type: 'success', text: '验证成功，已切换为内置 Key 模式。' })
+      await fetchData()
     } finally {
       setVerifying(false)
     }
@@ -100,40 +86,36 @@ export default function SettingsPage() {
   const handleGenerationModeChange = async (mode: 'batch' | 'direct') => {
     setGenerationMode(mode)
     setKeyMessage(null)
-    try {
-      const res = await apiFetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ generation_mode: mode }),
-      })
-      const data = await res.json()
-      if (res.ok) {
-        setSettings(data)
-        setKeyMessage({
-          type: 'success',
-          text: mode === 'batch'
-            ? '已切换为 Batch 半价模式'
-            : '已切换为普通即时模式',
-        })
-      } else {
-        setKeyMessage({ type: 'error', text: data.error || '保存生成模式失败' })
-      }
-    } catch {
-      setKeyMessage({ type: 'error', text: '网络错误，请重试' })
+    const res = await apiFetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ generation_mode: mode }),
+    })
+    const data = await res.json()
+
+    if (!res.ok) {
+      setKeyMessage({ type: 'error', text: data.error || '保存生成模式失败' })
+      return
     }
+
+    setSettings(data)
+    setKeyMessage({
+      type: 'success',
+      text: mode === 'batch' ? '已切换为 Batch 半价模式。' : '已切换为普通即时模式。',
+    })
   }
 
-  // Save own API key
   const handleSaveApiKey = async () => {
     const trimmedKey = apiKey.trim()
     if (!trimmedKey) {
-      setKeyMessage({ type: 'error', text: '请输入 API Key' })
+      setKeyMessage({ type: 'error', text: '请输入 API Key。' })
       return
     }
     if (!trimmedKey.startsWith('AIza') || trimmedKey.length < 30) {
       setKeyMessage({ type: 'error', text: '这不像有效的 Gemini API Key。Google AI Studio 的 key 通常以 AIza 开头。' })
       return
     }
+
     setSaving(true)
     setKeyMessage(null)
     try {
@@ -146,21 +128,19 @@ export default function SettingsPage() {
         }),
       })
       const data = await res.json()
-      if (res.ok) {
-        setKeyMessage({ type: 'success', text: 'API Key 已保存' })
-        setApiKey('')
-        await fetchData()
-      } else {
+      if (!res.ok) {
         setKeyMessage({ type: 'error', text: data.error || '保存失败' })
+        return
       }
-    } catch {
-      setKeyMessage({ type: 'error', text: '网络错误，请重试' })
+
+      setApiKey('')
+      setKeyMessage({ type: 'success', text: 'API Key 已保存。' })
+      await fetchData()
     } finally {
       setSaving(false)
     }
   }
 
-  // Switch key mode
   const handleModeChange = async (mode: 'builtin' | 'own') => {
     setKeyMode(mode)
     setKeyMessage(null)
@@ -168,33 +148,45 @@ export default function SettingsPage() {
     setApiKey('')
 
     if (mode === 'own' && settings?.use_builtin_key) {
-      // Switch away from builtin
-      try {
-        await apiFetch('/api/settings', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ use_builtin_key: false }),
-        })
-        await fetchData()
-      } catch {
-        // silent
-      }
+      await apiFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ use_builtin_key: false }),
+      })
+      await fetchData()
+      return
+    }
+
+    if (mode === 'builtin' && settings?.builtin_key_email_authorized) {
+      await apiFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ use_builtin_key: true }),
+      })
+      setKeyMessage({ type: 'success', text: '你的邮箱已授权，已切换为内置 Key 模式。' })
+      await fetchData()
     }
   }
 
   const getKeyStatus = () => {
     if (!settings) return { text: '未设置', color: 'text-gray-500' }
+    if (settings.builtin_key_email_authorized && settings.use_builtin_key) {
+      return { text: '已授权（公司内置 Key）', color: 'text-green-600' }
+    }
+    if (settings.builtin_key_email_authorized) {
+      return { text: '邮箱已授权，可使用内置 Key', color: 'text-green-600' }
+    }
     if (settings.use_builtin_key && settings.builtin_key_password_verified) {
-      return { text: '已验证 (内置 Key)', color: 'text-green-600' }
+      return { text: '已验证（内置 Key）', color: 'text-green-600' }
     }
     if (settings.use_builtin_key && !settings.builtin_key_password_verified) {
-      return { text: '内置 Key (待验证)', color: 'text-yellow-600' }
+      return { text: '内置 Key（待验证）', color: 'text-yellow-600' }
     }
     if (settings.gemini_api_key_encrypted && settings.gemini_api_key_valid === false) {
       return { text: 'Key 格式无效，请重新保存', color: 'text-red-600' }
     }
     if (settings.gemini_api_key_encrypted && settings.gemini_api_key_valid !== false) {
-      return { text: '已设置 (自有 Key)', color: 'text-green-600' }
+      return { text: '已设置（自有 Key）', color: 'text-green-600' }
     }
     return { text: '未设置', color: 'text-red-600' }
   }
@@ -208,6 +200,7 @@ export default function SettingsPage() {
   }
 
   const keyStatus = getKeyStatus()
+  const isEmailAuthorized = Boolean(settings?.builtin_key_email_authorized)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -217,16 +210,21 @@ export default function SettingsPage() {
         <h2 className="mb-6 text-xl font-semibold text-gray-900">系统设置</h2>
 
         <div className="space-y-6">
-          {/* Section 1: Gemini API Key */}
           <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
             <h3 className="mb-1 text-base font-semibold text-gray-900">Gemini API Key</h3>
             <p className="mb-4 text-sm text-gray-500">
-              当前状态: <span className={`font-medium ${keyStatus.color}`}>{keyStatus.text}</span>
+              当前状态：<span className={`font-medium ${keyStatus.color}`}>{keyStatus.text}</span>
             </p>
 
-            {/* Mode radio */}
-            <div className="mb-4 flex gap-6">
-              <label className="flex items-center gap-2 cursor-pointer">
+            {isEmailAuthorized && (
+              <div className="mb-4 rounded-md bg-green-50 p-3 text-sm text-green-700">
+                已获得公司授权，可直接使用内置 API。
+                {settings?.builtin_key_authorization_note ? ` 备注：${settings.builtin_key_authorization_note}` : ''}
+              </div>
+            )}
+
+            <div className="mb-4 flex flex-wrap gap-6">
+              <label className="flex cursor-pointer items-center gap-2">
                 <input
                   type="radio"
                   name="keyMode"
@@ -234,9 +232,11 @@ export default function SettingsPage() {
                   onChange={() => handleModeChange('builtin')}
                   className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
-                <span className="text-sm text-gray-700">使用内置 Key (需密码)</span>
+                <span className="text-sm text-gray-700">
+                  {isEmailAuthorized ? '使用内置 Key（邮箱已授权）' : '使用内置 Key（需密码）'}
+                </span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex cursor-pointer items-center gap-2">
                 <input
                   type="radio"
                   name="keyMode"
@@ -248,28 +248,28 @@ export default function SettingsPage() {
               </label>
             </div>
 
-            {/* Message */}
             {keyMessage && (
-              <div
-                className={`mb-4 rounded-md p-3 text-sm ${
-                  keyMessage.type === 'success'
-                    ? 'bg-green-50 text-green-700'
-                    : 'bg-red-50 text-red-700'
-                }`}
-              >
+              <div className={`mb-4 rounded-md p-3 text-sm ${
+                keyMessage.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+              }`}>
                 {keyMessage.text}
               </div>
             )}
 
-            {/* Builtin mode: password input */}
-            {keyMode === 'builtin' && (
+            {keyMode === 'builtin' && isEmailAuthorized && (
+              <div className="rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+                你的登录邮箱在授权名单中，不需要输入访问密码。后端运行任务时也会再次校验这个授权。
+              </div>
+            )}
+
+            {keyMode === 'builtin' && !isEmailAuthorized && (
               <div className="flex items-end gap-3">
                 <div className="flex-1">
                   <label className="mb-1 block text-sm font-medium text-gray-700">访问密码</label>
                   <input
                     type="password"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(event) => setPassword(event.target.value)}
                     placeholder="请输入内置 Key 访问密码"
                     className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
@@ -277,14 +277,13 @@ export default function SettingsPage() {
                 <button
                   onClick={handleVerifyBuiltin}
                   disabled={verifying}
-                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                 >
                   {verifying ? '验证中...' : '验证'}
                 </button>
               </div>
             )}
 
-            {/* Own mode: API key input */}
             {keyMode === 'own' && (
               <div className="flex items-end gap-3">
                 <div className="flex-1">
@@ -292,7 +291,7 @@ export default function SettingsPage() {
                   <input
                     type="password"
                     value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
+                    onChange={(event) => setApiKey(event.target.value)}
                     placeholder="输入你的 Gemini API Key"
                     className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
@@ -300,7 +299,7 @@ export default function SettingsPage() {
                 <button
                   onClick={handleSaveApiKey}
                   disabled={saving}
-                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                 >
                   {saving ? '保存中...' : '保存'}
                 </button>
@@ -308,14 +307,11 @@ export default function SettingsPage() {
             )}
           </div>
 
-          {/* Section 2: Current Mode */}
           <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
             <h3 className="mb-4 text-base font-semibold text-gray-900">生成模式</h3>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className={`cursor-pointer rounded-md border p-4 transition-colors ${
-                generationMode === 'batch'
-                  ? 'border-blue-300 bg-blue-50'
-                  : 'border-gray-200 bg-white hover:bg-gray-50'
+                generationMode === 'batch' ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white hover:bg-gray-50'
               }`}>
                 <div className="flex items-center gap-2">
                   <input
@@ -328,14 +324,12 @@ export default function SettingsPage() {
                   <span className="text-sm font-medium text-gray-900">Batch 半价模式</span>
                 </div>
                 <p className="mt-2 text-xs leading-5 text-gray-500">
-                  使用 Gemini Batch API，价格约为普通模式 50%，适合批量出图；完成时间通常更久，官方目标最长可到 24 小时。
+                  使用 Gemini Batch API，价格约为普通模式 50%，适合批量出图；完成时间通常更久。
                 </p>
               </label>
 
               <label className={`cursor-pointer rounded-md border p-4 transition-colors ${
-                generationMode === 'direct'
-                  ? 'border-blue-300 bg-blue-50'
-                  : 'border-gray-200 bg-white hover:bg-gray-50'
+                generationMode === 'direct' ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white hover:bg-gray-50'
               }`}>
                 <div className="flex items-center gap-2">
                   <input
@@ -348,16 +342,13 @@ export default function SettingsPage() {
                   <span className="text-sm font-medium text-gray-900">普通即时模式</span>
                 </div>
                 <p className="mt-2 text-xs leading-5 text-gray-500">
-                  使用 Gemini 2.5 Flash Image 普通 API，适合少量图片或需要尽快看到结果的任务。
+                  使用 Gemini 2.5 Flash Image 普通 API，适合少量图片或需要更快看到结果的任务。
                 </p>
               </label>
             </div>
-            <p className="mt-3 text-xs text-gray-400">
-              当前模型：Nano Banana / Gemini 2.5 Flash Image
-            </p>
+            <p className="mt-3 text-xs text-gray-400">当前模型：Nano Banana / Gemini 2.5 Flash Image</p>
           </div>
 
-          {/* Section 3: Account Info */}
           <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
             <h3 className="mb-4 text-base font-semibold text-gray-900">账户信息</h3>
             <dl className="space-y-3">
@@ -368,9 +359,7 @@ export default function SettingsPage() {
               <div>
                 <dt className="text-xs font-medium text-gray-500">注册时间</dt>
                 <dd className="mt-0.5 text-sm text-gray-900">
-                  {profile?.created_at
-                    ? new Date(profile.created_at).toLocaleString('zh-CN')
-                    : '-'}
+                  {profile?.created_at ? new Date(profile.created_at).toLocaleString('zh-CN') : '-'}
                 </dd>
               </div>
             </dl>

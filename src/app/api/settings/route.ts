@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedUser, getRequestSupabase } from '@/lib/supabase'
 import { encodeStoredGeminiSettings, isValidGeminiApiKey, parseStoredGeminiSettings } from '@/lib/gemini-settings'
+import { getBuiltinKeyAuthorization } from '@/lib/builtin-key-access'
 
-function withGenerationMode<T extends { gemini_api_key_encrypted: string | null }>(settings: T) {
+async function withGenerationMode<T extends { gemini_api_key_encrypted: string | null }>(settings: T, email?: string | null) {
   const stored = parseStoredGeminiSettings(settings.gemini_api_key_encrypted)
   const hasStoredKey = Boolean(stored.apiKey)
   const hasValidStoredKey = isValidGeminiApiKey(stored.apiKey)
+  const authorization = await getBuiltinKeyAuthorization(email)
   return {
     ...settings,
     gemini_api_key_encrypted: hasStoredKey ? 'configured' : null,
     gemini_api_key_valid: hasValidStoredKey,
     generation_mode: stored.generationMode || 'batch',
+    builtin_key_email_authorized: Boolean(authorization?.active),
+    builtin_key_authorization_note: authorization?.note || null,
   }
 }
 
@@ -48,10 +52,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: createError.message }, { status: 500 })
     }
 
-    return NextResponse.json(withGenerationMode(newSettings))
+    return NextResponse.json(await withGenerationMode(newSettings, user.email))
   }
 
-  return NextResponse.json(withGenerationMode(settings))
+  return NextResponse.json(await withGenerationMode(settings, user.email))
 }
 
 export async function PUT(request: NextRequest) {
@@ -124,5 +128,5 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: result.error.message }, { status: 500 })
   }
 
-  return NextResponse.json(withGenerationMode(result.data))
+  return NextResponse.json(await withGenerationMode(result.data, user.email))
 }

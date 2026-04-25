@@ -12,6 +12,7 @@ import {
   uploadBatchInputFile,
 } from '@/lib/gemini-batch'
 import { GenerationMode, isValidGeminiApiKey, parseStoredGeminiSettings, readBuiltinGeminiApiKey } from '@/lib/gemini-settings'
+import { isBuiltinKeyEmailAuthorized } from '@/lib/builtin-key-access'
 
 export const maxDuration = 300
 
@@ -38,7 +39,8 @@ type JobItemRecord = {
 
 async function getGeminiSettings(
   supabase: RequestSupabase,
-  userId: string
+  userId: string,
+  userEmail?: string | null
 ): Promise<{ apiKey: string | null; generationMode: GenerationMode }> {
   const { data: settings } = await supabase
     .from('system_settings')
@@ -46,11 +48,21 @@ async function getGeminiSettings(
     .eq('user_id', userId)
     .maybeSingle()
 
-  if (!settings) return { apiKey: null, generationMode: 'batch' }
+  const emailAuthorized = await isBuiltinKeyEmailAuthorized(userEmail)
+
+  if (!settings) {
+    return {
+      apiKey: emailAuthorized ? readBuiltinGeminiApiKey() : null,
+      generationMode: 'batch',
+    }
+  }
   const stored = parseStoredGeminiSettings(settings.gemini_api_key_encrypted)
   const generationMode = stored.generationMode || 'batch'
 
-  if (settings.use_builtin_key && settings.builtin_key_password_verified) {
+  if (
+    (settings.use_builtin_key && (settings.builtin_key_password_verified || emailAuthorized)) ||
+    (emailAuthorized && !stored.apiKey)
+  ) {
     return { apiKey: readBuiltinGeminiApiKey(), generationMode }
   }
 
@@ -534,8 +546,8 @@ async function runDirectJob(supabase: RequestSupabase, apiKey: string, job: JobR
   }
 }
 
-async function runOrPollBatchJob(supabase: RequestSupabase, job: JobRecord) {
-  const { apiKey, generationMode } = await getGeminiSettings(supabase, job.user_id)
+async function runOrPollBatchJob(supabase: RequestSupabase, job: JobRecord, userEmail?: string | null) {
+  const { apiKey, generationMode } = await getGeminiSettings(supabase, job.user_id, userEmail)
   if (!apiKey) {
     await supabase
       .from('jobs')
@@ -622,7 +634,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { apiKey } = await getGeminiSettings(supabase, job.user_id)
+    const { apiKey } = await getGeminiSettings(supabase, job.user_id, user.email)
     if (!apiKey || !isValidGeminiApiKey(apiKey)) {
       await supabase
         .from('jobs')
@@ -636,7 +648,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
-    const result = await runOrPollBatchJob(supabase, job as JobRecord)
+    const result = await runOrPollBatchJob(supabase, job as JobRecord, user.email)
     const status = 'status' in result && typeof result.status === 'number' ? result.status : 200
     return NextResponse.json(result, { status })
   } catch (err) {
