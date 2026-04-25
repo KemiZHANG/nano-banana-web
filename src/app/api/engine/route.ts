@@ -559,7 +559,7 @@ async function runOrPollBatchJob(supabase: RequestSupabase, job: JobRecord) {
   const batch = await getGeminiBatch(apiKey, meta.batchName)
   const state = getBatchState(batch)
 
-  if (state === 'JOB_STATE_SUCCEEDED') {
+  if (state === 'JOB_STATE_SUCCEEDED' || state === 'BATCH_STATE_SUCCEEDED') {
     const resultFileName = getBatchResultFile(batch)
     if (!resultFileName) {
       await markBatchTerminalFailure(supabase, job.id, 'failed', 'Gemini batch succeeded but no result file was returned')
@@ -568,13 +568,18 @@ async function runOrPollBatchJob(supabase: RequestSupabase, job: JobRecord) {
     return processBatchResults(supabase, apiKey, job, resultFileName)
   }
 
-  if (state === 'JOB_STATE_FAILED' || state === 'JOB_STATE_EXPIRED') {
+  if (
+    state === 'JOB_STATE_FAILED' ||
+    state === 'JOB_STATE_EXPIRED' ||
+    state === 'BATCH_STATE_FAILED' ||
+    state === 'BATCH_STATE_EXPIRED'
+  ) {
     const message = getBatchErrorMessage(batch) || `Gemini batch ended with ${state}`
     await markBatchTerminalFailure(supabase, job.id, 'failed', message)
     return { error: message, status: 500 }
   }
 
-  if (state === 'JOB_STATE_CANCELLED') {
+  if (state === 'JOB_STATE_CANCELLED' || state === 'BATCH_STATE_CANCELLED') {
     await markBatchTerminalFailure(supabase, job.id, 'cancelled', 'Gemini batch was cancelled')
     return { success: true, status: 'cancelled' }
   }

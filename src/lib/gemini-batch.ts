@@ -14,6 +14,10 @@ type GeminiBatchStatus = {
   done?: boolean
   metadata?: {
     state?: string
+    output?: {
+      responsesFile?: string
+      responses_file?: string
+    }
   }
   response?: {
     responsesFile?: string
@@ -51,6 +55,8 @@ export function getBatchResultFile(batch: GeminiBatchStatus) {
     batch.dest?.file_name ||
     batch.response?.responsesFile ||
     batch.response?.responses_file ||
+    batch.metadata?.output?.responsesFile ||
+    batch.metadata?.output?.responses_file ||
     null
   )
 }

@@ -48,6 +48,10 @@ function ItemStatusBadge({ status }: { status: string }) {
   )
 }
 
+function isBatchMetaMessage(message: string | null | undefined) {
+  return Boolean(message?.startsWith('__GEMINI_BATCH__'))
+}
+
 export default function JobsPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
@@ -249,7 +253,7 @@ export default function JobsPage() {
                       ) : jobDetail ? (
                         <div className="space-y-6">
                           {/* Error message */}
-                          {jobDetail.error_message && (
+                          {jobDetail.error_message && !isBatchMetaMessage(jobDetail.error_message) && (
                             <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
                               错误: {jobDetail.error_message}
                             </div>
