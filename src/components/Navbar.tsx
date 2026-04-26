@@ -34,14 +34,16 @@ export default function Navbar() {
   }
 
   return (
-    <nav className="border-b border-gray-200 bg-white">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        {/* Left: Logo + Links */}
+    <nav className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-8">
-          <Link href="/" className="flex items-center gap-2 text-lg font-bold text-gray-900">
-            <span className="text-xl">🍌</span>
-            <span>Nano Banana</span>
+          <Link href="/" className="flex items-center gap-3 text-lg font-semibold text-slate-950">
+            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-amber-100 text-xl shadow-sm">
+              🍌
+            </span>
+            <span className="tracking-tight">Nano Banana</span>
           </Link>
+
           <div className="hidden items-center gap-1 sm:flex">
             {visibleLinks.map((link) => {
               const isActive =
@@ -54,8 +56,8 @@ export default function Navbar() {
                   href={link.href}
                   className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                     isActive
-                      ? 'bg-gray-100 text-gray-900'
-                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                      ? 'bg-slate-100 text-slate-950'
+                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-950'
                   }`}
                 >
                   {link.label}
@@ -65,24 +67,22 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* Right: User info + Logout */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {userEmail && (
-            <span className="hidden text-sm text-gray-500 sm:inline">
+            <span className="hidden max-w-[260px] truncate text-sm text-slate-500 md:inline">
               {userEmail}
             </span>
           )}
           <button
             onClick={handleLogout}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+            className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950"
           >
             Logout
           </button>
         </div>
       </div>
 
-      {/* Mobile nav links */}
-      <div className="flex gap-1 overflow-x-auto border-t border-gray-100 px-4 py-1 sm:hidden">
+      <div className="flex gap-1 overflow-x-auto border-t border-slate-100 px-4 py-2 sm:hidden">
         {visibleLinks.map((link) => {
           const isActive =
             link.href === '/'
@@ -94,8 +94,8 @@ export default function Navbar() {
               href={link.href}
               className={`shrink-0 rounded-md px-3 py-1 text-sm font-medium transition-colors ${
                 isActive
-                  ? 'bg-gray-100 text-gray-900'
-                  : 'text-gray-600 hover:bg-gray-50'
+                  ? 'bg-slate-100 text-slate-950'
+                  : 'text-slate-500 hover:bg-slate-50'
               }`}
             >
               {link.label}
