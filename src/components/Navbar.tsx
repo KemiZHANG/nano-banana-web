@@ -34,12 +34,12 @@ export default function Navbar() {
   }
 
   return (
-    <nav className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
-      <div className="h-1 bg-gradient-to-r from-amber-400 via-sky-400 to-emerald-400" />
+    <nav className="sticky top-0 z-40 border-b border-stone-700 bg-stone-950/95 shadow-sm backdrop-blur">
+      <div className="h-1 bg-amber-400" />
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-8">
-          <Link href="/" className="flex items-center gap-3 text-lg font-semibold text-slate-950">
-            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-gradient-to-br from-amber-200 to-orange-100 text-xl shadow-sm">
+          <Link href="/" className="flex items-center gap-3 text-lg font-semibold text-stone-50">
+            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-amber-400/15 text-xl shadow-sm ring-1 ring-amber-400/30">
               🍌
             </span>
             <span className="tracking-tight">Nano Banana</span>
@@ -57,8 +57,8 @@ export default function Navbar() {
                   href={link.href}
                   className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                     isActive
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-slate-500 hover:bg-amber-50 hover:text-slate-950'
+                      ? 'bg-amber-400/15 text-amber-200'
+                      : 'text-stone-400 hover:bg-stone-800 hover:text-stone-50'
                   }`}
                 >
                   {link.label}
@@ -70,20 +70,20 @@ export default function Navbar() {
 
         <div className="flex items-center gap-3">
           {userEmail && (
-            <span className="hidden max-w-[260px] truncate text-sm text-slate-500 md:inline">
+            <span className="hidden max-w-[260px] truncate text-sm text-stone-400 md:inline">
               {userEmail}
             </span>
           )}
           <button
             onClick={handleLogout}
-            className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950"
+            className="rounded-md border border-stone-700 px-3 py-1.5 text-sm font-medium text-stone-300 transition-colors hover:bg-stone-800 hover:text-stone-50"
           >
             Logout
           </button>
         </div>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto border-t border-slate-100 px-4 py-2 sm:hidden">
+      <div className="flex gap-1 overflow-x-auto border-t border-stone-800 px-4 py-2 sm:hidden">
         {visibleLinks.map((link) => {
           const isActive =
             link.href === '/'
@@ -95,8 +95,8 @@ export default function Navbar() {
               href={link.href}
               className={`shrink-0 rounded-md px-3 py-1 text-sm font-medium transition-colors ${
                 isActive
-                  ? 'bg-blue-50 text-blue-700'
-                  : 'text-slate-500 hover:bg-amber-50'
+                  ? 'bg-amber-400/15 text-amber-200'
+                  : 'text-stone-400 hover:bg-stone-800'
               }`}
             >
               {link.label}
