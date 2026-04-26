@@ -15,6 +15,57 @@ type NewCategoryForm = {
   icon: string
 }
 
+const CATEGORY_ACCENTS = [
+  {
+    border: 'border-sky-200',
+    ring: 'ring-sky-100',
+    soft: 'bg-sky-50 text-sky-700',
+    icon: 'bg-sky-100',
+    bar: 'from-sky-400 to-cyan-400',
+    hover: 'hover:border-sky-300',
+  },
+  {
+    border: 'border-emerald-200',
+    ring: 'ring-emerald-100',
+    soft: 'bg-emerald-50 text-emerald-700',
+    icon: 'bg-emerald-100',
+    bar: 'from-emerald-400 to-teal-400',
+    hover: 'hover:border-emerald-300',
+  },
+  {
+    border: 'border-violet-200',
+    ring: 'ring-violet-100',
+    soft: 'bg-violet-50 text-violet-700',
+    icon: 'bg-violet-100',
+    bar: 'from-violet-400 to-fuchsia-400',
+    hover: 'hover:border-violet-300',
+  },
+  {
+    border: 'border-amber-200',
+    ring: 'ring-amber-100',
+    soft: 'bg-amber-50 text-amber-700',
+    icon: 'bg-amber-100',
+    bar: 'from-amber-400 to-orange-400',
+    hover: 'hover:border-amber-300',
+  },
+  {
+    border: 'border-rose-200',
+    ring: 'ring-rose-100',
+    soft: 'bg-rose-50 text-rose-700',
+    icon: 'bg-rose-100',
+    bar: 'from-rose-400 to-pink-400',
+    hover: 'hover:border-rose-300',
+  },
+  {
+    border: 'border-indigo-200',
+    ring: 'ring-indigo-100',
+    soft: 'bg-indigo-50 text-indigo-700',
+    icon: 'bg-indigo-100',
+    bar: 'from-indigo-400 to-blue-400',
+    hover: 'hover:border-indigo-300',
+  },
+]
+
 function slugify(value: string) {
   return value
     .trim()
@@ -92,6 +143,13 @@ export default function DashboardPage() {
     const images = categories.reduce((sum, category) => sum + (category.image_count ?? 0), 0)
     return { prompts, images, jobs: prompts * images }
   }, [categories])
+
+  const statCards = [
+    { label: '类目', value: categories.length, color: 'from-sky-500 to-cyan-500', bg: 'bg-sky-50', text: 'text-sky-700' },
+    { label: 'Prompts', value: stats.prompts, color: 'from-violet-500 to-fuchsia-500', bg: 'bg-violet-50', text: 'text-violet-700' },
+    { label: '产品图片', value: stats.images, color: 'from-emerald-500 to-teal-500', bg: 'bg-emerald-50', text: 'text-emerald-700' },
+    { label: '潜在任务数', value: stats.jobs, color: 'from-amber-500 to-orange-500', bg: 'bg-amber-50', text: 'text-amber-700' },
+  ]
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -199,15 +257,18 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[linear-gradient(180deg,#fefce8_0%,#f8fafc_22%,#eef6ff_100%)]">
       <Navbar />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <section className="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-5 px-5 py-5 lg:flex-row lg:items-center lg:justify-between">
+        <section className="mb-6 overflow-hidden rounded-lg border border-white/80 bg-white shadow-sm">
+          <div className="h-1.5 bg-gradient-to-r from-amber-400 via-sky-400 to-emerald-400" />
+          <div className="flex flex-col gap-5 bg-gradient-to-br from-amber-50 via-white to-sky-50 px-5 py-6 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Dashboard</p>
-              <h1 className="mt-1 text-2xl font-semibold text-slate-950">类目管理</h1>
+              <p className="inline-flex rounded-md bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
+                Dashboard
+              </p>
+              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">类目管理</h1>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
                 管理电商生图类目、产品图片和 prompts。预置类目现在也可以删除，删除后不会自动恢复。
               </p>
@@ -217,36 +278,27 @@ export default function DashboardPage() {
               <button
                 onClick={handleRun}
                 disabled={selected.size === 0 || running}
-                className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-md bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:from-emerald-600 hover:to-teal-600 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {running ? '提交中...' : `运行已选类目 (${selected.size})`}
               </button>
               <button
                 onClick={() => setShowNewModal(true)}
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
+                className="rounded-md bg-gradient-to-r from-blue-500 to-violet-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:from-blue-600 hover:to-violet-600"
               >
                 新建类目
               </button>
             </div>
           </div>
 
-          <div className="grid border-t border-slate-100 sm:grid-cols-4">
-            <div className="border-b border-slate-100 px-5 py-4 sm:border-b-0 sm:border-r">
-              <div className="text-2xl font-semibold text-slate-950">{categories.length}</div>
-              <div className="mt-1 text-xs text-slate-500">类目</div>
-            </div>
-            <div className="border-b border-slate-100 px-5 py-4 sm:border-b-0 sm:border-r">
-              <div className="text-2xl font-semibold text-slate-950">{stats.prompts}</div>
-              <div className="mt-1 text-xs text-slate-500">Prompts</div>
-            </div>
-            <div className="border-b border-slate-100 px-5 py-4 sm:border-b-0 sm:border-r">
-              <div className="text-2xl font-semibold text-slate-950">{stats.images}</div>
-              <div className="mt-1 text-xs text-slate-500">产品图片</div>
-            </div>
-            <div className="px-5 py-4">
-              <div className="text-2xl font-semibold text-slate-950">{stats.jobs}</div>
-              <div className="mt-1 text-xs text-slate-500">潜在任务数</div>
-            </div>
+          <div className="grid gap-3 border-t border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-4">
+            {statCards.map((card) => (
+              <div key={card.label} className={`rounded-md border border-white bg-white p-4 shadow-sm ${card.bg}`}>
+                <div className={`mb-3 h-1 w-12 rounded-full bg-gradient-to-r ${card.color}`} />
+                <div className="text-2xl font-semibold text-slate-950">{card.value}</div>
+                <div className={`mt-1 text-xs font-medium ${card.text}`}>{card.label}</div>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -275,30 +327,33 @@ export default function DashboardPage() {
             <p className="text-sm text-slate-500">类目加载中...</p>
           </div>
         ) : categories.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-300 bg-white p-12 text-center">
+          <div className="rounded-lg border border-dashed border-sky-300 bg-sky-50/50 p-12 text-center">
             <h2 className="text-base font-semibold text-slate-900">暂无类目</h2>
             <p className="mt-2 text-sm text-slate-500">点击“新建类目”开始创建自己的 prompt 工作区。</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {categories.map((category) => {
+            {categories.map((category, index) => {
               const isSelected = selected.has(category.id)
               const isDeleting = deletingId === category.id
+              const accent = CATEGORY_ACCENTS[index % CATEGORY_ACCENTS.length]
 
               return (
                 <article
                   key={category.id}
-                  className={`group rounded-lg border bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md ${
-                    isSelected ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200'
+                  className={`group overflow-hidden rounded-lg border bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${
+                    isSelected ? `${accent.border} ring-2 ${accent.ring}` : `border-slate-200 ${accent.hover}`
                   }`}
                 >
+                  <div className={`h-1.5 bg-gradient-to-r ${accent.bar}`} />
+                  <div className="p-4">
                   <div className="mb-4 flex items-start justify-between gap-3">
                     <button
                       onClick={() => toggleSelect(category.id)}
                       className={`flex h-8 w-8 items-center justify-center rounded-md border text-sm transition-colors ${
                         isSelected
-                          ? 'border-blue-500 bg-blue-600 text-white'
-                          : 'border-slate-200 bg-white text-slate-400 hover:border-blue-300 hover:text-blue-600'
+                          ? 'border-transparent bg-slate-950 text-white'
+                          : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:text-slate-900'
                       }`}
                       aria-label={isSelected ? '取消选择类目' : '选择类目'}
                     >
@@ -315,7 +370,7 @@ export default function DashboardPage() {
                   </div>
 
                   <Link href={`/category/${category.slug}`} className="block">
-                    <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-md bg-slate-100 text-2xl">
+                    <div className={`mb-3 flex h-12 w-12 items-center justify-center rounded-md text-2xl shadow-sm ${accent.icon}`}>
                       {category.icon}
                     </div>
                     <h3 className="line-clamp-1 text-base font-semibold text-slate-950">
@@ -324,9 +379,9 @@ export default function DashboardPage() {
                     <p className="mt-1 line-clamp-1 text-xs text-slate-400">/{category.slug}</p>
 
                     <div className="mt-4 grid grid-cols-2 gap-2">
-                      <div className="rounded-md bg-slate-50 px-3 py-2">
+                      <div className={`rounded-md px-3 py-2 ${accent.soft}`}>
                         <div className="text-sm font-semibold text-slate-900">{category.prompt_count ?? 0}</div>
-                        <div className="mt-0.5 text-[11px] text-slate-500">Prompts</div>
+                        <div className="mt-0.5 text-[11px] opacity-75">Prompts</div>
                       </div>
                       <div className="rounded-md bg-slate-50 px-3 py-2">
                         <div className="text-sm font-semibold text-slate-900">{category.image_count ?? 0}</div>
@@ -334,6 +389,7 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   </Link>
+                  </div>
                 </article>
               )
             })}
@@ -344,7 +400,9 @@ export default function DashboardPage() {
       {showNewModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div className="fixed inset-0 bg-slate-950/50" onClick={() => setShowNewModal(false)} />
-          <div className="relative z-10 w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+          <div className="relative z-10 w-full max-w-md overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+            <div className="h-1.5 bg-gradient-to-r from-blue-500 via-violet-500 to-amber-400" />
+            <div className="p-6">
             <h3 className="text-lg font-semibold text-slate-950">新建类目</h3>
             <p className="mt-1 text-sm text-slate-500">创建一个新的类目工作区，再为它添加 prompts 和产品图片。</p>
 
@@ -391,12 +449,13 @@ export default function DashboardPage() {
                 <button
                   type="submit"
                   disabled={creating}
-                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                  className="rounded-md bg-gradient-to-r from-blue-500 to-violet-500 px-4 py-2 text-sm font-medium text-white transition hover:from-blue-600 hover:to-violet-600 disabled:opacity-50"
                 >
                   {creating ? '创建中...' : '创建'}
                 </button>
               </div>
             </form>
+            </div>
           </div>
         </div>
       )}

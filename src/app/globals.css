@@ -3,13 +3,14 @@
 @tailwind utilities;
 
 :root {
-  --background: #f8fafc;
+  --background: #f6f8fc;
   --foreground: #0f172a;
 }
 
 body {
   color: var(--foreground);
-  background: var(--background);
+  background:
+    linear-gradient(180deg, #fff7ed 0%, #f6f8fc 18%, #eef6ff 100%);
   font-family: Arial, Helvetica, sans-serif;
   font-feature-settings: "rlig" 1, "calt" 1;
 }

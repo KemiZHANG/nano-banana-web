@@ -34,11 +34,12 @@ export default function Navbar() {
   }
 
   return (
-    <nav className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
+    <nav className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+      <div className="h-1 bg-gradient-to-r from-amber-400 via-sky-400 to-emerald-400" />
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-8">
           <Link href="/" className="flex items-center gap-3 text-lg font-semibold text-slate-950">
-            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-amber-100 text-xl shadow-sm">
+            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-gradient-to-br from-amber-200 to-orange-100 text-xl shadow-sm">
               🍌
             </span>
             <span className="tracking-tight">Nano Banana</span>
@@ -56,8 +57,8 @@ export default function Navbar() {
                   href={link.href}
                   className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                     isActive
-                      ? 'bg-slate-100 text-slate-950'
-                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-950'
+                      ? 'bg-blue-50 text-blue-700'
+                      : 'text-slate-500 hover:bg-amber-50 hover:text-slate-950'
                   }`}
                 >
                   {link.label}
@@ -94,8 +95,8 @@ export default function Navbar() {
               href={link.href}
               className={`shrink-0 rounded-md px-3 py-1 text-sm font-medium transition-colors ${
                 isActive
-                  ? 'bg-slate-100 text-slate-950'
-                  : 'text-slate-500 hover:bg-slate-50'
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'text-slate-500 hover:bg-amber-50'
               }`}
             >
               {link.label}
