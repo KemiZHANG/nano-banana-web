@@ -17,28 +17,12 @@ type NewCategoryForm = {
 
 const CATEGORY_ACCENTS = [
   {
-    border: 'border-amber-400/60',
-    ring: 'ring-amber-400/20',
-    soft: 'bg-amber-400/10 text-amber-200',
-    icon: 'bg-amber-400/15 text-amber-100',
-    bar: 'bg-amber-400',
-    hover: 'hover:border-amber-400/50',
-  },
-  {
-    border: 'border-teal-400/60',
-    ring: 'ring-teal-400/20',
-    soft: 'bg-teal-400/10 text-teal-200',
-    icon: 'bg-teal-400/15 text-teal-100',
-    bar: 'bg-teal-400',
-    hover: 'hover:border-teal-400/50',
-  },
-  {
-    border: 'border-slate-500/70',
-    ring: 'ring-slate-400/20',
-    soft: 'bg-slate-700/70 text-slate-200',
-    icon: 'bg-slate-700 text-slate-100',
-    bar: 'bg-slate-500',
-    hover: 'hover:border-slate-400/70',
+    border: 'border-zinc-500',
+    ring: 'ring-zinc-500/20',
+    soft: 'bg-zinc-800 text-zinc-200',
+    icon: 'bg-zinc-800 text-zinc-100',
+    bar: 'bg-zinc-700',
+    hover: 'hover:border-zinc-500',
   },
 ]
 
@@ -121,10 +105,10 @@ export default function DashboardPage() {
   }, [categories])
 
   const statCards = [
-    { label: '类目', value: categories.length, bar: 'bg-amber-400', bg: 'bg-stone-900', text: 'text-amber-200' },
-    { label: 'Prompts', value: stats.prompts, bar: 'bg-teal-400', bg: 'bg-stone-900', text: 'text-teal-200' },
-    { label: '产品图片', value: stats.images, bar: 'bg-slate-500', bg: 'bg-stone-900', text: 'text-slate-300' },
-    { label: '潜在任务数', value: stats.jobs, bar: 'bg-zinc-500', bg: 'bg-stone-900', text: 'text-zinc-300' },
+    { label: '类目', value: categories.length },
+    { label: 'Prompts', value: stats.prompts },
+    { label: '产品图片', value: stats.images },
+    { label: '潜在任务数', value: stats.jobs },
   ]
 
   const toggleSelect = (id: string) => {
@@ -237,11 +221,11 @@ export default function DashboardPage() {
       <Navbar />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <section className="mb-6 overflow-hidden rounded-lg border border-stone-700 bg-stone-900 shadow-sm">
-          <div className="h-1 bg-amber-400" />
+        <section className="mb-6 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 shadow-sm">
+          <div className="h-px bg-zinc-700" />
           <div className="flex flex-col gap-5 bg-stone-900 px-5 py-6 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="inline-flex rounded-md bg-amber-400/10 px-2.5 py-1 text-xs font-medium text-amber-200 ring-1 ring-amber-400/20">
+              <p className="inline-flex rounded-md bg-zinc-800 px-2.5 py-1 text-xs font-medium text-zinc-300 ring-1 ring-zinc-700">
                 Dashboard
               </p>
               <h1 className="mt-3 text-2xl font-semibold tracking-tight text-stone-50">类目管理</h1>
@@ -254,13 +238,13 @@ export default function DashboardPage() {
               <button
                 onClick={handleRun}
                 disabled={selected.size === 0 || running}
-                className="rounded-md bg-teal-500 px-4 py-2 text-sm font-medium text-stone-950 shadow-sm transition-colors hover:bg-teal-400 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-950 shadow-sm transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {running ? '提交中...' : `运行已选类目 (${selected.size})`}
               </button>
               <button
                 onClick={() => setShowNewModal(true)}
-                className="rounded-md bg-amber-400 px-4 py-2 text-sm font-medium text-stone-950 shadow-sm transition-colors hover:bg-amber-300"
+                className="rounded-md border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-100 shadow-sm transition-colors hover:bg-zinc-700"
               >
                 新建类目
               </button>
@@ -269,10 +253,10 @@ export default function DashboardPage() {
 
           <div className="grid gap-3 border-t border-stone-800 bg-stone-950/60 p-4 sm:grid-cols-4">
             {statCards.map((card) => (
-              <div key={card.label} className={`rounded-md border border-stone-700 p-4 shadow-sm ${card.bg}`}>
-                <div className={`mb-3 h-1 w-12 rounded-full ${card.bar}`} />
+              <div key={card.label} className="rounded-md border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
+                <div className="mb-3 h-px w-12 rounded-full bg-zinc-600" />
                 <div className="text-2xl font-semibold text-stone-50">{card.value}</div>
-                <div className={`mt-1 text-xs font-medium ${card.text}`}>{card.label}</div>
+                <div className="mt-1 text-xs font-medium text-zinc-400">{card.label}</div>
               </div>
             ))}
           </div>
@@ -328,8 +312,8 @@ export default function DashboardPage() {
                       onClick={() => toggleSelect(category.id)}
                       className={`flex h-10 min-w-10 items-center justify-center rounded-md border-2 text-sm font-bold shadow-sm transition-colors ${
                         isSelected
-                          ? 'border-amber-300 bg-amber-400 text-stone-950'
-                          : 'border-stone-500 bg-stone-800 text-stone-300 hover:border-amber-300 hover:text-amber-200'
+                          ? 'border-zinc-100 bg-zinc-100 text-zinc-950'
+                          : 'border-zinc-500 bg-zinc-900 text-zinc-300 hover:border-zinc-200 hover:text-zinc-100'
                       }`}
                       aria-label={isSelected ? '取消选择类目' : '选择类目'}
                     >
@@ -377,7 +361,7 @@ export default function DashboardPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div className="fixed inset-0 bg-black/70" onClick={() => setShowNewModal(false)} />
           <div className="relative z-10 w-full max-w-md overflow-hidden rounded-lg border border-stone-700 bg-stone-900 shadow-xl">
-            <div className="h-1 bg-amber-400" />
+            <div className="h-px bg-zinc-700" />
             <div className="p-6">
             <h3 className="text-lg font-semibold text-stone-50">新建类目</h3>
             <p className="mt-1 text-sm text-stone-400">创建一个新的类目工作区，再为它添加 prompts 和产品图片。</p>
@@ -390,7 +374,7 @@ export default function DashboardPage() {
                   value={newForm.name_zh}
                   onChange={(event) => setNewForm((form) => ({ ...form, name_zh: event.target.value }))}
                   placeholder="例如：护肤品"
-                  className="w-full rounded-md border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-50 placeholder-stone-500 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                  className="w-full rounded-md border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-50 placeholder-stone-500 focus:border-zinc-300 focus:outline-none focus:ring-1 focus:ring-zinc-300"
                 />
               </div>
               <div>
@@ -401,7 +385,7 @@ export default function DashboardPage() {
                   onChange={(event) => setNewForm((form) => ({ ...form, slug: event.target.value }))}
                   onBlur={() => setNewForm((form) => ({ ...form, slug: slugify(form.slug) }))}
                   placeholder="例如：skincare"
-                  className="w-full rounded-md border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-50 placeholder-stone-500 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                  className="w-full rounded-md border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-50 placeholder-stone-500 focus:border-zinc-300 focus:outline-none focus:ring-1 focus:ring-zinc-300"
                 />
               </div>
               <div>
@@ -410,7 +394,7 @@ export default function DashboardPage() {
                   value={newForm.icon}
                   onChange={(event) => setNewForm((form) => ({ ...form, icon: event.target.value }))}
                   placeholder="emoji icon"
-                  className="w-full rounded-md border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-50 placeholder-stone-500 focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                  className="w-full rounded-md border border-stone-700 bg-stone-950 px-3 py-2 text-sm text-stone-50 placeholder-stone-500 focus:border-zinc-300 focus:outline-none focus:ring-1 focus:ring-zinc-300"
                 />
               </div>
 
@@ -425,7 +409,7 @@ export default function DashboardPage() {
                 <button
                   type="submit"
                   disabled={creating}
-                  className="rounded-md bg-amber-400 px-4 py-2 text-sm font-medium text-stone-950 transition-colors hover:bg-amber-300 disabled:opacity-50"
+                  className="rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-white disabled:opacity-50"
                 >
                   {creating ? '创建中...' : '创建'}
                 </button>
