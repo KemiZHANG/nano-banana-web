@@ -206,7 +206,12 @@ export default function CategoryPromptPage() {
     const res = await apiFetch('/api/prompts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ category_id: category.id, prompt_text: newText.trim(), prompt_role: newRole }),
+      body: JSON.stringify({
+        category_id: category.id,
+        prompt_text: newText.trim(),
+        prompt_role: newRole,
+        sync_to_all_categories: newRole !== 'custom',
+      }),
     })
     const data = await res.json().catch(() => null)
     if (!res.ok) {
@@ -215,6 +220,9 @@ export default function CategoryPromptPage() {
     }
     setNewText('')
     setNewRole('custom')
+    if (data?.synced_count) {
+      setNotice(`已新增指令，并同步生成到其他 ${data.synced_count} 个类目。`)
+    }
     await fetchCategory()
   }
 
@@ -322,6 +330,7 @@ export default function CategoryPromptPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           category_id: category.id,
+          image_role: aiImageType,
           product_type: getCategoryDisplayName(category, 'en'),
           image_style: `${roleLabel} ${aiStyle}`.trim(),
           people_mode: aiPeople,
@@ -339,6 +348,7 @@ export default function CategoryPromptPage() {
           category_id: category.id,
           prompt_role: aiImageType,
           prompt_text: data.prompt_text,
+          sync_to_all_categories: aiImageType !== 'custom',
         }),
       })
       const saveData = await saveRes.json().catch(() => null)
@@ -348,7 +358,7 @@ export default function CategoryPromptPage() {
       setAiStyle('')
       setAiPeople('')
       setAiScene('')
-      setNotice(text.aiNotice)
+      setNotice(saveData?.synced_count ? `AI 已生成并保存新指令，同时同步生成到其他 ${saveData.synced_count} 个类目。` : text.aiNotice)
       await fetchCategory()
     } catch (err) {
       setError(err instanceof Error ? err.message : text.aiError)

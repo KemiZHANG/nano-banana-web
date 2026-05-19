@@ -10,8 +10,7 @@ import {
 } from '@/lib/prompt-generator-skill'
 import { AI_ACCESS_ERROR, getGenerationAccess } from '@/lib/generation-access'
 import { getWorkspaceContext, getWorkspaceSupabase } from '@/lib/workspace'
-import { isResumeEdition } from '@/lib/app-edition'
-import { consumeResumeTrial, needsResumeBuiltinTrial, RESUME_TRIAL_ERROR_CODE } from '@/lib/resume-trial'
+import { normalizeProductImageRole } from '@/lib/types'
 
 function extractText(response: unknown) {
   const parts = (response as {
@@ -37,18 +36,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: AI_ACCESS_ERROR, code: 'AI_ACCESS_REQUIRED' }, { status: 403 })
   }
 
-  if (needsResumeBuiltinTrial(generationAccess, 'gemini')) {
-    const trial = await consumeResumeTrial(supabase, user.id, 1)
-    if (!trial.allowed) {
-      return NextResponse.json({
-        error: trial.error,
-        code: trial.code || RESUME_TRIAL_ERROR_CODE,
-        trial: trial.status,
-      }, { status: 403 })
-    }
-  }
-
-  const access = isResumeEdition() ? { allowed: true } : await getBuiltinKeyAccess(user.id, user.email)
+  const access = await getBuiltinKeyAccess(user.id, user.email)
   const admin = isAdminEmail(user.email)
   const { data: settings } = await supabase
     .from('system_settings')
@@ -56,9 +44,7 @@ export async function POST(request: NextRequest) {
     .eq('user_id', user.id)
     .maybeSingle()
   const ownGeminiKey = parseStoredGeminiSettings(settings?.gemini_api_key_encrypted).apiKey || null
-  const apiKey = isResumeEdition()
-    ? (ownGeminiKey || readBuiltinGeminiApiKey())
-    : (admin || access.allowed ? readBuiltinGeminiApiKey() : ownGeminiKey)
+  const apiKey = admin || access.allowed ? readBuiltinGeminiApiKey() : ownGeminiKey
 
   if (!apiKey || !isValidGeminiApiKey(apiKey)) {
     return NextResponse.json({
@@ -71,6 +57,7 @@ export async function POST(request: NextRequest) {
   const {
     category_id,
     product_type,
+    image_role,
     image_style,
     people_mode,
     display_method,
@@ -94,10 +81,15 @@ export async function POST(request: NextRequest) {
 
   const { data: prompts } = await supabase
     .from('category_prompts')
-    .select('prompt_text')
+    .select('prompt_text,prompt_role')
     .eq('category_id', category_id)
     .order('prompt_number', { ascending: true })
-    .limit(3)
+
+  const normalizedRole = normalizeProductImageRole(image_role || image_style)
+  const existingPrompts = (prompts || [])
+    .filter((prompt) => !normalizedRole || normalizeProductImageRole(prompt.prompt_role) === normalizedRole)
+    .map((prompt) => prompt.prompt_text)
+    .filter(Boolean) as string[]
 
   const { data: rules } = await supabase
     .from('rule_templates')
@@ -106,21 +98,22 @@ export async function POST(request: NextRequest) {
     .eq('active', true)
 
   const ruleText = (rules || [])
-    .map((rule) => `【${rule.name} / ${rule.scope}】\n${rule.content}`)
+    .map((rule) => `[${rule.name} / ${rule.scope}]\n${rule.content}`)
     .join('\n\n')
 
   const userPrompt = buildPromptGeneratorUserPrompt({
     categoryName: category.name_zh,
     categorySlug: category.slug,
     productType: String(product_type || '').trim(),
+    imageRole: String(image_role || '').trim(),
     imageStyle: String(image_style || '').trim(),
     peopleMode: String(people_mode || '').trim(),
     displayMethod: String(display_method || '').trim(),
     extraInfo: [
       String(extra_info || '').trim(),
-      ruleText ? `请遵守以下网站规则模板和图片输出限制：\n${ruleText}` : '',
+      ruleText ? `Follow these active site rules and image-output restrictions:\n${ruleText}` : '',
     ].filter(Boolean).join('\n\n'),
-    existingPrompts: prompts?.map((prompt) => prompt.prompt_text) || [],
+    existingPrompts,
   })
 
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${PROMPT_GENERATOR_MODEL}:generateContent?key=${apiKey}`, {
@@ -137,7 +130,7 @@ export async function POST(request: NextRequest) {
         },
       ],
       generationConfig: {
-        temperature: 0.7,
+        temperature: 0.82,
         maxOutputTokens: 1800,
       },
     }),

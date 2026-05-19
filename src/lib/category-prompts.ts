@@ -10,7 +10,7 @@ export type CategoryPromptLike = {
   [key: string]: unknown
 }
 
-const IMAGE_ROLE_ORDER: ProductImageRole[] = ['main', 'scene', 'detail']
+export const IMAGE_ROLE_ORDER: ProductImageRole[] = ['main', 'scene', 'detail']
 
 function titleCaseWords(value: string) {
   return value
@@ -77,6 +77,25 @@ export function compactCategoryPrompts(prompts: CategoryPromptLike[] | null | un
       prompt_text: picked?.prompt_text || defaultPromptText(categoryName, role),
     }
   })
+}
+
+export function listCategoryPrompts(prompts: CategoryPromptLike[] | null | undefined) {
+  return (prompts || [])
+    .map((prompt) => ({
+      ...prompt,
+      prompt_role: getPromptRoleFromRow(prompt) || prompt.prompt_role || 'custom',
+      prompt_text: prompt.prompt_text || '',
+    }))
+    .sort((a, b) => {
+      const numberA = Number(a.prompt_number || 0)
+      const numberB = Number(b.prompt_number || 0)
+      if (numberA !== numberB) return numberA - numberB
+      return String(a.id || '').localeCompare(String(b.id || ''))
+    })
+}
+
+export function countCategoryPrompts(prompts: CategoryPromptLike[] | null | undefined) {
+  return (prompts || []).filter((prompt) => String(prompt.prompt_text || '').trim()).length
 }
 
 export function countCompactPromptRoles(prompts: CategoryPromptLike[] | null | undefined) {

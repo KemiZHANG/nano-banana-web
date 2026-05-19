@@ -24,13 +24,13 @@ import { AI_ACCESS_ERROR, getGenerationAccess } from '@/lib/generation-access'
 import { getWorkspaceContext, getWorkspaceSupabase } from '@/lib/workspace'
 import { analyzeProductCopyQuality } from '@/lib/product-quality'
 import { softenComplianceRiskText } from '@/lib/listing-text'
-import { isResumeEdition } from '@/lib/app-edition'
-import { consumeResumeTrial, needsResumeBuiltinTrial, RESUME_TRIAL_ERROR_CODE } from '@/lib/resume-trial'
 import {
   SHOPEE_CATEGORY_ATTRIBUTE_KEY,
   decodeShopeeCategorySelection,
   formatShopeeCategorySelection,
 } from '@/lib/shopee-categories'
+
+export const maxDuration = 300
 
 const IMAGE_ROLE_ORDER: ProductImageRole[] = ['main', 'scene', 'detail']
 
@@ -149,10 +149,6 @@ async function getTextGenerationApiKey(
     .maybeSingle()
 
   const stored = parseStoredGeminiSettings(settings?.gemini_api_key_encrypted)
-  if (isResumeEdition()) {
-    return stored.apiKey || readBuiltinGeminiApiKey() || null
-  }
-
   const admin = isAdminEmail(userEmail)
   const emailAuthorized = await isBuiltinKeyEmailAuthorized(userEmail)
   const passwordVerified = Boolean(settings?.use_builtin_key && settings?.builtin_key_password_verified)
@@ -217,6 +213,37 @@ function findPromptForRole(
   return null
 }
 
+function findPromptsForRole(
+  prompts: Array<{ prompt_number: number; prompt_role?: string | null; prompt_text?: string | null }> | null | undefined,
+  role: ProductImageRole
+) {
+  const roleMatches = (prompts || [])
+    .filter((prompt) => normalizeProductImageRole(prompt.prompt_role) === role && prompt.prompt_text)
+    .sort((a, b) => a.prompt_number - b.prompt_number)
+  if (roleMatches.length > 0) return roleMatches
+
+  const legacyMatch = findPromptForRole(prompts, role)
+  return legacyMatch?.prompt_text ? [legacyMatch] : []
+}
+
+function selectPromptForRole(
+  prompts: Array<{ prompt_number: number; prompt_role?: string | null; prompt_text?: string | null }> | null | undefined,
+  role: ProductImageRole,
+  categoryName: string,
+  variantSeed: number
+) {
+  const rolePrompts = findPromptsForRole(prompts, role)
+  const selected = rolePrompts.length > 0
+    ? rolePrompts[Math.abs(variantSeed - 1) % rolePrompts.length]
+    : null
+
+  return {
+    prompt_number: selected?.prompt_number || promptNumberForRole(role),
+    prompt_role: role,
+    prompt_text: selected?.prompt_text || defaultPromptForRole(categoryName, role),
+  }
+}
+
 export async function POST(request: NextRequest) {
   const supabase = getWorkspaceSupabase()
   const { user, workspaceKey, error: authError } = await getWorkspaceContext(request)
@@ -236,17 +263,6 @@ export async function POST(request: NextRequest) {
   const access = await getGenerationAccess(supabase, user.id, user.email)
   if (!access.allowed) {
     return NextResponse.json({ error: AI_ACCESS_ERROR, code: 'AI_ACCESS_REQUIRED' }, { status: 403 })
-  }
-
-  if (needsResumeBuiltinTrial(access, 'gemini')) {
-    const trial = await consumeResumeTrial(supabase, user.id, 1)
-    if (!trial.allowed) {
-      return NextResponse.json({
-        error: trial.error,
-        code: trial.code || RESUME_TRIAL_ERROR_CODE,
-        trial: trial.status,
-      }, { status: 403 })
-    }
   }
 
   const { data: rules } = await supabase
@@ -298,47 +314,29 @@ export async function POST(request: NextRequest) {
       .order('prompt_number', { ascending: true })
 
     const categoryName = product.categories?.name_zh || '商品'
-    const promptTemplatesByRole = new Map(IMAGE_ROLE_ORDER.map((role) => {
-      const number = promptNumberForRole(role)
-      const existing = findPromptForRole(prompts, role)
-      if (existing?.prompt_text) {
-        return {
-          prompt_number: number,
-          prompt_role: role,
-          prompt_text: existing.prompt_text,
-        }
-      }
-
-      return {
-        prompt_number: number,
-        prompt_role: role,
-        prompt_text: defaultPromptForRole(categoryName, role),
-      }
-    }).map((prompt) => [prompt.prompt_role, prompt]))
-
-    const copyPlan = parseLanguageCopyPlan(product)
     const { data: existingCopies } = await supabase
       .from('product_copies')
       .select('language_code,copy_index')
       .eq('workspace_key', workspaceKey)
       .eq('product_id', product.id)
+
     const nextCopyIndexByLanguage = new Map<string, number>()
     for (const existingCopy of existingCopies || []) {
       const languageCode = String(existingCopy.language_code || '')
-      const copyIndex = Math.max(0, Math.floor(Number(existingCopy.copy_index || 0)))
-      nextCopyIndexByLanguage.set(languageCode, Math.max(nextCopyIndexByLanguage.get(languageCode) || 1, copyIndex + 1))
+      const currentMax = nextCopyIndexByLanguage.get(languageCode) || 0
+      nextCopyIndexByLanguage.set(languageCode, Math.max(currentMax, Number(existingCopy.copy_index || 0)))
     }
 
+    const copyPlan = parseLanguageCopyPlan(product)
     let productHasImageJobs = false
     for (const { languageCode, imageRoles } of copyPlan) {
-      const copyIndex = nextCopyIndexByLanguage.get(languageCode) || 1
-      nextCopyIndexByLanguage.set(languageCode, copyIndex + 1)
       const languageLabel = getLanguageLabel(languageCode)
+      const actualCopyIndex = (nextCopyIndexByLanguage.get(languageCode) || 0) + 1
+      nextCopyIndexByLanguage.set(languageCode, actualCopyIndex)
       const hasSourceImages = (product.images || []).length > 0
       const selectedPromptTemplates = imageRoles
         .filter(() => hasSourceImages)
-        .map((role) => promptTemplatesByRole.get(role))
-        .filter(Boolean) as Array<{ prompt_number: number; prompt_role: ProductImageRole; prompt_text: string }>
+        .map((role, roleIndex) => selectPromptForRole(prompts, role, categoryName, actualCopyIndex + roleIndex))
 
         const seoKeywordBank = seoKeywordBanks.find((bank) =>
           bank.category_id === product.category_id &&
@@ -355,7 +353,7 @@ export async function POST(request: NextRequest) {
           categoryName,
           attributes: product.attributes || {},
           languageLabel,
-          copyIndex,
+          copyIndex: actualCopyIndex,
           ruleText,
           seoKeywordText,
         }))
@@ -380,7 +378,7 @@ export async function POST(request: NextRequest) {
             user_id: user.id,
             workspace_key: workspaceKey,
             sku: product.sku,
-            copy_index: copyIndex,
+            copy_index: actualCopyIndex,
             language_code: languageCode,
             language_label: languageLabel,
             generated_title: generatedTitle,
@@ -414,7 +412,7 @@ export async function POST(request: NextRequest) {
             categoryName,
             attributes: product.attributes || {},
             languageLabel,
-            copyIndex,
+            copyIndex: actualCopyIndex,
             ruleText,
             seoKeywordText,
             promptRole: prompt.prompt_role || promptRole(prompt.prompt_number),
@@ -435,16 +433,29 @@ export async function POST(request: NextRequest) {
 
   if (imageCopyIds.length > 0) {
     const processUrl = new URL('/api/product-copies/process', request.url)
-    fetch(processUrl.toString(), {
+    const processResponse = await fetch(processUrl.toString(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: request.headers.get('authorization') || '',
       },
       body: JSON.stringify({ copy_ids: imageCopyIds }),
-    }).catch(() => {
-      // Copies remain queued and can be processed later.
     })
+
+    if (!processResponse.ok) {
+      const processError = await processResponse.json().catch(() => null)
+      const message = processError?.error || '图片生成处理启动失败，请稍后重试。'
+      await supabase
+        .from('product_copy_images')
+        .update({ status: 'failed', error_message: message })
+        .in('copy_id', imageCopyIds)
+        .in('status', ['queued', 'generating'])
+      await supabase
+        .from('product_copies')
+        .update({ status: 'needs_review', error_message: message })
+        .in('id', imageCopyIds)
+      return NextResponse.json({ error: message, code: processError?.code }, { status: processResponse.status })
+    }
   }
 
   return NextResponse.json({ created: createdCopyIds.length, copy_ids: createdCopyIds }, { status: 201 })

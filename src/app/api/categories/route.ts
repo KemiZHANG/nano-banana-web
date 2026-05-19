@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceContext, getWorkspaceSupabase } from '@/lib/workspace'
 import { defaultDetailPrompt, defaultMainPrompt, defaultScenePrompt } from '@/lib/product-generation'
 import { ensurePresetCategoriesForUser } from '@/lib/preset-seed'
-import { countCompactPromptRoles, getCategoryPromptSubject } from '@/lib/category-prompts'
+import { countCategoryPrompts, getCategoryPromptSubject } from '@/lib/category-prompts'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -118,7 +118,7 @@ export async function GET(request: NextRequest) {
 
   const enriched = (categories || []).map((cat) => ({
     ...cat,
-    prompt_count: countCompactPromptRoles(promptsByCategory.get(cat.id)),
+    prompt_count: countCategoryPrompts(promptsByCategory.get(cat.id)),
     image_count: imageCounts.get(cat.id) || 0,
   }))
 
