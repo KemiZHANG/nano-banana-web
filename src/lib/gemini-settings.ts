@@ -8,6 +8,8 @@ type StoredGeminiSettings = {
   openaiApiKey?: string | null
   generationMode?: GenerationMode
   imageProvider?: ImageProvider
+  resumeTrialUsed?: number
+  resumeTrialUpdatedAt?: string | null
 }
 
 export function parseStoredGeminiSettings(value: string | null | undefined): StoredGeminiSettings {
@@ -23,6 +25,8 @@ export function parseStoredGeminiSettings(value: string | null | undefined): Sto
       openaiApiKey: parsed.openaiApiKey || null,
       generationMode: parsed.generationMode === 'direct' ? 'direct' : 'batch',
       imageProvider: parsed.imageProvider === 'openai' ? 'openai' : 'gemini',
+      resumeTrialUsed: Math.max(0, Math.floor(Number(parsed.resumeTrialUsed || 0))),
+      resumeTrialUpdatedAt: parsed.resumeTrialUpdatedAt || null,
     }
   } catch {
     return { apiKey: value, generationMode: 'batch' }
@@ -35,6 +39,8 @@ export function encodeStoredGeminiSettings(settings: StoredGeminiSettings) {
     openaiApiKey: settings.openaiApiKey || null,
     generationMode: settings.generationMode === 'direct' ? 'direct' : 'batch',
     imageProvider: settings.imageProvider === 'openai' ? 'openai' : 'gemini',
+    resumeTrialUsed: Math.max(0, Math.floor(Number(settings.resumeTrialUsed || 0))),
+    resumeTrialUpdatedAt: settings.resumeTrialUpdatedAt || null,
   })}`
 }
 

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import BrandMark from '@/components/BrandMark'
 import LanguageToggle from '@/components/LanguageToggle'
+import TaskCompletionWatcher from '@/components/TaskCompletionWatcher'
 import { isAdminEmail } from '@/lib/admin'
 import { getClientBrandConfig } from '@/lib/brand'
 import { signOutAndRedirectToLogin } from '@/lib/client-auth'
@@ -25,12 +26,13 @@ export default function Navbar() {
     { href: '/categories', label: text.categories },
     { href: '/product-outputs', label: text.productOutputs },
     { href: '/outputs', label: text.imageOutputs },
+    { href: '/tasks', label: text.tasks },
     { href: '/seo-keywords', label: text.seoKeywords },
     { href: '/rules', label: text.rules },
     { href: '/settings', label: text.settings },
   ]
 
-  const visibleLinks = isAdminEmail(userEmail)
+  const visibleLinks = brand.edition === 'company' && isAdminEmail(userEmail)
     ? [...navLinks, { href: '/admin/authorized-emails', label: text.admin }]
     : navLinks
 
@@ -46,6 +48,8 @@ export default function Navbar() {
   }
 
   return (
+    <>
+    <TaskCompletionWatcher />
     <nav className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/78 shadow-[0_18px_70px_rgba(15,23,42,0.06)] backdrop-blur-2xl">
       <div className="mx-auto flex h-16 max-w-[1600px] items-center justify-between px-5 sm:px-8">
         <div className="flex min-w-0 items-center gap-4">
@@ -108,5 +112,6 @@ export default function Navbar() {
         })}
       </div>
     </nav>
+    </>
   )
 }

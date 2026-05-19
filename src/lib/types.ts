@@ -113,6 +113,9 @@ export interface SystemSettings {
   builtin_key_password_verified: boolean
   generation_mode?: 'direct' | 'batch'
   image_provider?: 'gemini' | 'openai'
+  resume_trial_limit?: number
+  resume_trial_used?: number
+  resume_trial_remaining?: number
   created_at: string
   updated_at: string
 }

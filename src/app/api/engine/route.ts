@@ -30,6 +30,8 @@ import {
 } from '@/lib/openai-image'
 import { AI_ACCESS_ERROR, getGenerationAccess } from '@/lib/generation-access'
 import { getWorkspaceContext, getWorkspaceSupabase, type WorkspaceKey } from '@/lib/workspace'
+import { isResumeEdition } from '@/lib/app-edition'
+import { consumeResumeTrial, needsResumeBuiltinTrial, RESUME_TRIAL_ERROR_CODE } from '@/lib/resume-trial'
 
 export const maxDuration = 300
 
@@ -66,16 +68,31 @@ async function getGeminiSettings(
     .eq('user_id', userId)
     .maybeSingle()
 
-  const emailAuthorized = await isBuiltinKeyEmailAuthorized(userEmail)
-  const admin = isAdminEmail(userEmail)
-
   if (!settings) {
+    if (isResumeEdition()) {
+      return {
+        apiKey: readBuiltinGeminiApiKey(),
+        generationMode: 'batch',
+      }
+    }
+
+    const emailAuthorized = await isBuiltinKeyEmailAuthorized(userEmail)
+    const admin = isAdminEmail(userEmail)
     return {
       apiKey: (admin || emailAuthorized) ? readBuiltinGeminiApiKey() : null,
       generationMode: 'batch',
     }
   }
   const stored = parseStoredGeminiSettings(settings.gemini_api_key_encrypted)
+  if (isResumeEdition()) {
+    return {
+      apiKey: stored.apiKey || readBuiltinGeminiApiKey(),
+      generationMode: stored.generationMode === 'direct' ? 'direct' : 'batch',
+    }
+  }
+
+  const emailAuthorized = await isBuiltinKeyEmailAuthorized(userEmail)
+  const admin = isAdminEmail(userEmail)
   const generationMode: GenerationMode = emailAuthorized && !admin
     ? 'batch'
     : (stored.generationMode === 'direct' ? 'direct' : 'batch')
@@ -103,6 +120,15 @@ async function getImageGenerationSettings(
     .maybeSingle()
 
   const stored = parseStoredGeminiSettings(settings?.gemini_api_key_encrypted)
+  if (isResumeEdition()) {
+    const provider: ImageProvider = stored.imageProvider === 'openai' ? 'openai' : 'gemini'
+    return {
+      provider,
+      apiKey: provider === 'openai' ? (stored.openaiApiKey || null) : (stored.apiKey || readBuiltinGeminiApiKey()),
+      generationMode: stored.generationMode === 'direct' ? 'direct' : 'batch',
+    }
+  }
+
   const admin = isAdminEmail(userEmail)
   const emailAuthorized = await isBuiltinKeyEmailAuthorized(userEmail)
   const passwordVerified = Boolean(settings?.use_builtin_key && settings?.builtin_key_password_verified)
@@ -1144,6 +1170,24 @@ export async function POST(request: NextRequest) {
     }
 
     const generationSettings = await getImageGenerationSettings(supabase, job.user_id, user.email)
+    if (needsResumeBuiltinTrial(access, generationSettings.provider)) {
+      const trial = await consumeResumeTrial(supabase, user.id, 1)
+      if (!trial.allowed) {
+        await supabase
+          .from('jobs')
+          .update({
+            status: 'failed',
+            error_message: trial.error || 'Public demo trial limit reached.',
+          })
+          .eq('id', job.id)
+        return NextResponse.json({
+          error: trial.error,
+          code: trial.code || RESUME_TRIAL_ERROR_CODE,
+          trial: trial.status,
+        }, { status: 403 })
+      }
+    }
+
     if (generationSettings.provider === 'openai') {
       if (!generationSettings.apiKey || !isValidOpenAIApiKey(generationSettings.apiKey)) {
         await supabase

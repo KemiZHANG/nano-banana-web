@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { isAdminEmail, isPrimaryAdminEmail } from '@/lib/admin'
 import { getAuthorizedUser } from '@/lib/app-auth'
 import { getServerSupabase } from '@/lib/supabase'
+import { isResumeEdition } from '@/lib/app-edition'
 
 async function requireAdmin(request: NextRequest) {
+  if (isResumeEdition()) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
   const { user, error } = await getAuthorizedUser(request)
   if (error || !user) {
     return NextResponse.json({ error: error || 'Unauthorized' }, { status: 403 })

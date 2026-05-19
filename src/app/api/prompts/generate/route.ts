@@ -10,6 +10,8 @@ import {
 } from '@/lib/prompt-generator-skill'
 import { AI_ACCESS_ERROR, getGenerationAccess } from '@/lib/generation-access'
 import { getWorkspaceContext, getWorkspaceSupabase } from '@/lib/workspace'
+import { isResumeEdition } from '@/lib/app-edition'
+import { consumeResumeTrial, needsResumeBuiltinTrial, RESUME_TRIAL_ERROR_CODE } from '@/lib/resume-trial'
 
 function extractText(response: unknown) {
   const parts = (response as {
@@ -35,7 +37,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: AI_ACCESS_ERROR, code: 'AI_ACCESS_REQUIRED' }, { status: 403 })
   }
 
-  const access = await getBuiltinKeyAccess(user.id, user.email)
+  if (needsResumeBuiltinTrial(generationAccess, 'gemini')) {
+    const trial = await consumeResumeTrial(supabase, user.id, 1)
+    if (!trial.allowed) {
+      return NextResponse.json({
+        error: trial.error,
+        code: trial.code || RESUME_TRIAL_ERROR_CODE,
+        trial: trial.status,
+      }, { status: 403 })
+    }
+  }
+
+  const access = isResumeEdition() ? { allowed: true } : await getBuiltinKeyAccess(user.id, user.email)
   const admin = isAdminEmail(user.email)
   const { data: settings } = await supabase
     .from('system_settings')
@@ -43,7 +56,9 @@ export async function POST(request: NextRequest) {
     .eq('user_id', user.id)
     .maybeSingle()
   const ownGeminiKey = parseStoredGeminiSettings(settings?.gemini_api_key_encrypted).apiKey || null
-  const apiKey = admin || access.allowed ? readBuiltinGeminiApiKey() : ownGeminiKey
+  const apiKey = isResumeEdition()
+    ? (ownGeminiKey || readBuiltinGeminiApiKey())
+    : (admin || access.allowed ? readBuiltinGeminiApiKey() : ownGeminiKey)
 
   if (!apiKey || !isValidGeminiApiKey(apiKey)) {
     return NextResponse.json({

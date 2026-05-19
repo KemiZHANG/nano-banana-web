@@ -75,7 +75,11 @@ export default function LoginPage() {
   }
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('reason') === 'unauthorized') {
+    if (
+      brand.edition === 'company' &&
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('reason') === 'unauthorized'
+    ) {
       setError(pickText(language, {
         zh: '这个账号当前没有授权，请联系管理员恢复权限。',
         en: 'This account is no longer authorized. Ask the primary admin to restore access.',

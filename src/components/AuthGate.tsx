@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { usePathname } from 'next/navigation'
-import { fetchAccessStatus, persistAuthorizedSession, signOutAndRedirectToLogin } from '@/lib/client-auth'
+import { UNAUTHORIZED_LOGIN_REASON, fetchAccessStatus, persistAuthorizedSession, signOutAndRedirectToLogin } from '@/lib/client-auth'
 import { supabase } from '@/lib/supabase'
 import { getAuthGateCopy } from '@/lib/ui-copy'
 import { useUiLanguage } from '@/lib/ui-language'
@@ -40,7 +40,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
         const access = await fetchAccessStatus(session.access_token)
         if (!access.ok) {
-          await signOutAndRedirectToLogin()
+          await signOutAndRedirectToLogin(UNAUTHORIZED_LOGIN_REASON)
           return
         }
 

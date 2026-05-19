@@ -6,8 +6,10 @@ import { useParams, useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import SignedImage from '@/components/SignedImage'
 import { apiFetch } from '@/lib/api'
+import { useSafeAutoRefresh } from '@/lib/safe-soft-refresh'
 import { supabase } from '@/lib/supabase'
 import { signStorageUrls } from '@/lib/signed-storage'
+import { startTaskNavigationWatch } from '@/lib/task-navigation'
 import { DEFAULT_PROMPT_ROLES } from '@/lib/types'
 import type { Category, CategoryImage, CategoryPrompt } from '@/lib/types'
 import { getCategoryDisplayName, pickText, useUiLanguage } from '@/lib/ui-language'
@@ -53,6 +55,9 @@ export default function CategoryPromptPage() {
   const [aiPeople, setAiPeople] = useState('')
   const [aiScene, setAiScene] = useState('')
   const [generatingPrompt, setGeneratingPrompt] = useState(false)
+  const [runPromptNumbers, setRunPromptNumbers] = useState<Set<number>>(new Set())
+  const [runPromptInitialized, setRunPromptInitialized] = useState(false)
+  const [runningImageJob, setRunningImageJob] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const text = {
@@ -114,6 +119,22 @@ export default function CategoryPromptPage() {
       zh: `已上传 ${count} 张类目参考图。`,
       en: `${count} category reference images uploaded.`,
     }),
+    standaloneRunTitle: pickText(language, { zh: '单独生成图片', en: 'Standalone image generation' }),
+    standaloneRunDescription: pickText(language, {
+      zh: '这里只控制本类目的“单独生成图片”任务，结果会去「图片生成输出」页面；不会影响初始商品或商品副本里的图片类型选择。',
+      en: 'This only controls standalone image jobs for this category. Results go to Image Outputs and do not affect product copy image choices.',
+    }),
+    standaloneRunButton: pickText(language, { zh: '运行本类目图片指令', en: 'Run this category' }),
+    standaloneRunning: pickText(language, { zh: '创建图片任务中...', en: 'Creating image jobs...' }),
+    standaloneNoPrompt: pickText(language, { zh: '请至少选择一条图片指令。', en: 'Select at least one image prompt.' }),
+    standaloneRunError: pickText(language, {
+      zh: '创建单独图片生成任务失败，请确认本类目有参考图和已选择的指令。',
+      en: 'Failed to create standalone image jobs. Make sure this category has reference images and selected prompts.',
+    }),
+    standaloneRunNotice: (count: number) => pickText(language, {
+      zh: `已创建 ${count} 个单独图片生成任务，可到「图片生成输出」查看结果。`,
+      en: `${count} standalone image jobs created. Check Image Outputs for results.`,
+    }),
     aiNotice: pickText(language, { zh: 'AI 已生成并保存一条新指令。', en: 'A new AI prompt has been generated and saved.' }),
     deletePromptConfirm: (number: number) => pickText(language, {
       zh: `确定删除 P${number} 吗？`,
@@ -148,6 +169,14 @@ export default function CategoryPromptPage() {
   useEffect(() => {
     if (!loading) void fetchCategory()
   }, [loading, fetchCategory])
+
+  useSafeAutoRefresh(fetchCategory, { enabled: !loading })
+
+  useEffect(() => {
+    if (!category || runPromptInitialized) return
+    setRunPromptNumbers(new Set(category.prompts.map((prompt) => prompt.prompt_number)))
+    setRunPromptInitialized(true)
+  }, [category, runPromptInitialized])
 
   const startEdit = (prompt: CategoryPrompt) => {
     setEditingId(prompt.id)
@@ -239,6 +268,48 @@ export default function CategoryPromptPage() {
     await fetchCategory()
   }
 
+  const toggleRunPrompt = (promptNumber: number) => {
+    setRunPromptNumbers((previous) => {
+      const next = new Set(previous)
+      if (next.has(promptNumber)) next.delete(promptNumber)
+      else next.add(promptNumber)
+      return next
+    })
+  }
+
+  const runStandaloneImages = async () => {
+    if (!category) return
+    if (runPromptNumbers.size === 0) {
+      setError(text.standaloneNoPrompt)
+      return
+    }
+    setRunningImageJob(true)
+    setError(null)
+    setNotice(null)
+    const res = await apiFetch('/api/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        category_ids: [category.id],
+        prompt_numbers: Array.from(runPromptNumbers),
+      }),
+    })
+    const data = await res.json().catch(() => null)
+    setRunningImageJob(false)
+    if (!res.ok) {
+      setError(data?.error || text.standaloneRunError)
+      return
+    }
+    startTaskNavigationWatch({
+      kind: 'standalone_image_job',
+      taskIds: data?.id ? [data.id] : [],
+      resultPath: '/outputs',
+      resultLabel: '图片生成输出',
+    })
+    setNotice(text.standaloneRunNotice(data.total_items || 0))
+    router.push('/tasks')
+  }
+
   const generatePromptWithAi = async () => {
     if (!category) return
     setGeneratingPrompt(true)
@@ -307,6 +378,35 @@ export default function CategoryPromptPage() {
 
         {error && <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700">{error}</div>}
         {notice && <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-700">{notice}</div>}
+
+        <section className="mb-5 rounded-[1.4rem] border border-blue-200/80 bg-blue-50/50 p-5 shadow-[0_18px_55px_rgba(15,23,42,0.04)]">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">{text.standaloneRunTitle}</h2>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{text.standaloneRunDescription}</p>
+            </div>
+            <button
+              onClick={runStandaloneImages}
+              disabled={runningImageJob || runPromptNumbers.size === 0}
+              className="w-fit rounded-2xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+            >
+              {runningImageJob ? text.standaloneRunning : text.standaloneRunButton}
+            </button>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {(category?.prompts || []).map((prompt) => (
+              <label key={prompt.id} className={`inline-flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ring-1 transition ${runPromptNumbers.has(prompt.prompt_number) ? 'bg-white text-blue-700 ring-blue-200' : 'bg-white/50 text-slate-500 ring-slate-200'}`}>
+                <input
+                  type="checkbox"
+                  checked={runPromptNumbers.has(prompt.prompt_number)}
+                  onChange={() => toggleRunPrompt(prompt.prompt_number)}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                P{prompt.prompt_number} {promptRoleLabel(prompt.prompt_role, language)}
+              </label>
+            ))}
+          </div>
+        </section>
 
         <section className="mb-5 rounded-[1.4rem] border border-slate-200/80 bg-white/90 p-5 shadow-[0_18px_55px_rgba(15,23,42,0.05)] backdrop-blur">
           <div className="mb-4 flex items-center justify-between gap-4">

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { isAdminEmail, normalizeEmail } from '@/lib/admin'
 import { getAuthorizedUser } from '@/lib/app-auth'
 import { getServerSupabase } from '@/lib/supabase'
+import { isResumeEdition } from '@/lib/app-edition'
 
 function tableMissingError(error: { code?: string; message?: string } | null) {
   if (!error?.message) return false
@@ -10,6 +11,10 @@ function tableMissingError(error: { code?: string; message?: string } | null) {
 }
 
 async function requireAdmin(request: NextRequest) {
+  if (isResumeEdition()) {
+    return { user: null, response: NextResponse.json({ error: 'Not found' }, { status: 404 }) }
+  }
+
   const { user, error } = await getAuthorizedUser(request)
   if (error || !user) {
     return { user: null, response: NextResponse.json({ error: error || 'Unauthorized' }, { status: 403 }) }

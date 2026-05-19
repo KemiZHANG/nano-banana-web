@@ -1,11 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import { apiFetch } from '@/lib/api'
 import { subscribeToTableChanges } from '@/lib/client-realtime'
+import { runSafeSoftRefresh, useSafeAutoRefresh } from '@/lib/safe-soft-refresh'
 import { supabase } from '@/lib/supabase'
 import { getProductImageRoleLabel } from '@/lib/types'
 import { pickText, useUiLanguage } from '@/lib/ui-language'
@@ -26,6 +27,14 @@ type DashboardData = {
     status: string
     language_label?: string
     copy_index?: number
+    created_at: string
+  }>
+  active_standalone_jobs: Array<{
+    id: string
+    status: string
+    total_items: number
+    completed_items: number
+    failed_items: number
     created_at: string
   }>
   failed_copies: Array<{
@@ -57,7 +66,8 @@ const statCards = [
 function statusTone(status: string) {
   if (status === 'failed') return 'bg-red-50 text-red-700 ring-red-100'
   if (status === 'completed') return 'bg-emerald-50 text-emerald-700 ring-emerald-100'
-  if (status === 'generating') return 'bg-blue-50 text-blue-700 ring-blue-100'
+  if (status === 'generating' || status === 'running') return 'bg-blue-50 text-blue-700 ring-blue-100'
+  if (status === 'queued' || status === 'pending') return 'bg-amber-50 text-amber-700 ring-amber-100'
   return 'bg-amber-50 text-amber-700 ring-amber-100'
 }
 
@@ -71,6 +81,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<DashboardData | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const syncingStandaloneRef = useRef(false)
   const text = language === 'en'
     ? {
         loading: 'Loading...',
@@ -131,7 +142,9 @@ export default function DashboardPage() {
   }))
   const localizedStatusLabels: Record<string, string> = {
     queued: pickText(language, { zh: '排队中', en: 'Queued' }),
+    pending: pickText(language, { zh: '排队中', en: 'Queued' }),
     generating: pickText(language, { zh: '生成中', en: 'Generating' }),
+    running: pickText(language, { zh: '生成中', en: 'Generating' }),
     completed: pickText(language, { zh: '已完成', en: 'Completed' }),
     failed: pickText(language, { zh: '失败', en: 'Failed' }),
     needs_review: pickText(language, { zh: '待确认', en: 'Needs review' }),
@@ -140,6 +153,7 @@ export default function DashboardPage() {
     products: pickText(language, { zh: '商品', en: 'Products' }),
     copies: pickText(language, { zh: '副本', en: 'Copies' }),
     images: pickText(language, { zh: '图片任务', en: 'Image tasks' }),
+    standalone_images: pickText(language, { zh: '单独图片任务', en: 'Standalone image tasks' }),
   }
   const localizedProgressHints: Record<string, string> = {
     products: pickText(language, { zh: '按商品 SKU 统计', en: 'Counted by product SKU' }),
@@ -147,6 +161,10 @@ export default function DashboardPage() {
     images: pickText(language, {
       zh: '按实际图片任务统计：每个副本会根据勾选生成 1 到 3 张图片，旧数据可能仍包含历史 6 图任务。',
       en: 'Counted by actual image jobs. Each copy can generate 1 to 3 images based on its selected roles.',
+    }),
+    standalone_images: pickText(language, {
+      zh: '类目详情页里单独生成的图片任务，不读取初始商品 SKU 原图。',
+      en: 'Image-only jobs created from category detail pages, separate from product SKU images.',
     }),
   }
 
@@ -157,7 +175,25 @@ export default function DashboardPage() {
     })
   }, [router])
 
-  const fetchDashboard = useCallback(async () => {
+  const syncActiveStandaloneEngines = useCallback(async (jobs: DashboardData['active_standalone_jobs']) => {
+    if (syncingStandaloneRef.current || jobs.length === 0) return
+    syncingStandaloneRef.current = true
+    try {
+      await Promise.all(
+        jobs.map((job) =>
+          apiFetch('/api/engine', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: job.id }),
+          }).catch(() => null)
+        )
+      )
+    } finally {
+      syncingStandaloneRef.current = false
+    }
+  }, [])
+
+  const fetchDashboard = useCallback(async (syncStandalone = true) => {
     setError(null)
     const res = await apiFetch('/api/dashboard')
     const json = await res.json().catch(() => null)
@@ -166,11 +202,19 @@ export default function DashboardPage() {
       return
     }
     setData(json)
-  }, [])
+    if (syncStandalone && json?.active_standalone_jobs?.length > 0) {
+      await syncActiveStandaloneEngines(json.active_standalone_jobs)
+      const refreshed = await apiFetch('/api/dashboard')
+      const refreshedJson = await refreshed.json().catch(() => null)
+      if (refreshed.ok && refreshedJson) setData(refreshedJson)
+    }
+  }, [syncActiveStandaloneEngines])
 
   useEffect(() => {
     if (!loading) fetchDashboard()
   }, [loading, fetchDashboard])
+
+  useSafeAutoRefresh(fetchDashboard, { enabled: !loading })
 
   useEffect(() => {
     if (loading) return
@@ -181,9 +225,11 @@ export default function DashboardPage() {
         { table: 'products' },
         { table: 'product_copies' },
         { table: 'product_copy_images' },
+        { table: 'jobs' },
+        { table: 'job_items' },
       ],
       () => {
-        void fetchDashboard()
+        runSafeSoftRefresh(fetchDashboard)
       },
       { debounceMs: 500 }
     )
@@ -208,7 +254,7 @@ export default function DashboardPage() {
             </div>
             <div className="flex flex-wrap gap-3">
               <button
-                onClick={fetchDashboard}
+                onClick={() => void fetchDashboard()}
                 className="command-card rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition duration-200 hover:-translate-y-0.5"
               >
                 {text.refresh}
@@ -280,7 +326,7 @@ export default function DashboardPage() {
               <div className="glass-surface rounded-[1.15rem] p-4">
                 <h2 className="text-lg font-semibold text-slate-950">{text.activeCopies}</h2>
                 <div className="mt-4 space-y-3">
-                  {data.active_copies.length === 0 && <EmptyState>{text.activeEmpty}</EmptyState>}
+                  {data.active_copies.length === 0 && data.active_standalone_jobs.length === 0 && <EmptyState>{text.activeEmpty}</EmptyState>}
                   {data.active_copies.map((copy) => (
                     <Link
                       key={copy.id}
@@ -296,6 +342,24 @@ export default function DashboardPage() {
                       <div className="mt-2 text-xs text-slate-500">
                         {copy.language_label}
                         {copy.copy_index} · {new Date(copy.created_at).toLocaleString()}
+                      </div>
+                    </Link>
+                  ))}
+                  {data.active_standalone_jobs.map((job) => (
+                    <Link
+                      key={job.id}
+                      href="/outputs"
+                      className="soft-lift block rounded-2xl border border-blue-100 bg-blue-50/60 p-4 hover:bg-blue-50"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-semibold text-slate-900">单独图片任务</span>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${statusTone(job.status)}`}>
+                          {localizedStatusLabels[job.status] || job.status}
+                        </span>
+                      </div>
+                      <div className="mt-2 text-xs text-slate-500">
+                        已生成 {job.completed_items}/{job.total_items} 张
+                        {job.failed_items > 0 ? `，失败 ${job.failed_items} 张` : ''} · {new Date(job.created_at).toLocaleString()}
                       </div>
                     </Link>
                   ))}

@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import { postClientEvent } from './client-telemetry'
-import { signOutAndRedirectToLogin } from './client-auth'
+import { UNAUTHORIZED_LOGIN_REASON, signOutAndRedirectToLogin } from './client-auth'
 
 const RETRYABLE_METHODS = new Set(['GET', 'HEAD'])
 const RETRYABLE_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504])
@@ -52,7 +52,7 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
   }
 
   if (typeof window !== 'undefined' && response.status === 401) {
-    void signOutAndRedirectToLogin()
+    void signOutAndRedirectToLogin(UNAUTHORIZED_LOGIN_REASON)
   }
 
   if (typeof window !== 'undefined' && response.status >= 500) {

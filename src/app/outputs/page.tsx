@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { apiFetch } from '@/lib/api'
 import { subscribeToTableChanges } from '@/lib/client-realtime'
+import { runSafeSoftRefresh, useSafeAutoRefresh } from '@/lib/safe-soft-refresh'
 import { signStorageUrls } from '@/lib/signed-storage'
 import type { Category, Output } from '@/lib/types'
 import Navbar from '@/components/Navbar'
@@ -24,6 +25,9 @@ export default function OutputsPage() {
   const [fetching, setFetching] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [downloadingSelected, setDownloadingSelected] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deletingSelected, setDeletingSelected] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // Filters
   const [categorySlug, setCategorySlug] = useState('')
@@ -71,6 +75,21 @@ export default function OutputsPage() {
       en: `Select ${filename}`,
     }),
     download: pickText(language, { zh: '下载', en: 'Download' }),
+    delete: pickText(language, { zh: '删除', en: 'Delete' }),
+    deleting: pickText(language, { zh: '删除中...', en: 'Deleting...' }),
+    deleteSelected: (count: number) => pickText(language, {
+      zh: `删除所选 (${count})`,
+      en: `Delete selected (${count})`,
+    }),
+    deleteConfirm: pickText(language, {
+      zh: '确定删除这张输出图片吗？删除后会从页面和存储中移除。',
+      en: 'Delete this output image? It will be removed from the page and storage.',
+    }),
+    deleteSelectedConfirm: (count: number) => pickText(language, {
+      zh: `确定删除所选的 ${count} 张输出图片吗？删除后会从页面和存储中移除。`,
+      en: `Delete ${count} selected output images? They will be removed from the page and storage.`,
+    }),
+    deleteError: pickText(language, { zh: '删除输出图片失败', en: 'Failed to delete output image' }),
     previous: pickText(language, { zh: '上一页', en: 'Previous' }),
     next: pickText(language, { zh: '下一页', en: 'Next' }),
     page: (current: number, pageCount: number) => pickText(language, {
@@ -147,6 +166,8 @@ export default function OutputsPage() {
     }
   }, [loading, fetchOutputs])
 
+  useSafeAutoRefresh(fetchOutputs, { enabled: !loading })
+
   useEffect(() => {
     if (loading) return
 
@@ -157,7 +178,7 @@ export default function OutputsPage() {
         { table: 'categories' },
       ],
       () => {
-        void fetchOutputs()
+        runSafeSoftRefresh(fetchOutputs)
       },
       { debounceMs: 500 }
     )
@@ -200,6 +221,34 @@ export default function OutputsPage() {
     document.body.removeChild(link)
   }
 
+  const deleteOutput = async (output: Output, confirmFirst = true) => {
+    if (confirmFirst && !window.confirm(text.deleteConfirm)) return false
+    setDeletingId(output.id)
+    setError(null)
+    try {
+      const res = await apiFetch(`/api/outputs/${output.id}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error || text.deleteError)
+      setSelected((previous) => {
+        const next = new Set(previous)
+        next.delete(output.id)
+        return next
+      })
+      setOutputUrls((previous) => {
+        const next = { ...previous }
+        delete next[output.storage_path]
+        return next
+      })
+      await fetchOutputs()
+      return true
+    } catch (err) {
+      setError(err instanceof Error ? err.message : text.deleteError)
+      return false
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const toggleSelected = (id: string) => {
     setSelected((previous) => {
       const next = new Set(previous)
@@ -228,6 +277,23 @@ export default function OutputsPage() {
     }
   }
 
+  const deleteSelectedOutputs = async () => {
+    const selectedOutputs = outputs.filter((output) => selected.has(output.id))
+    if (selectedOutputs.length === 0) return
+    if (!window.confirm(text.deleteSelectedConfirm(selectedOutputs.length))) return
+
+    setDeletingSelected(true)
+    setError(null)
+    try {
+      for (const output of selectedOutputs) {
+        const ok = await deleteOutput(output, false)
+        if (!ok) break
+      }
+    } finally {
+      setDeletingSelected(false)
+    }
+  }
+
   const getImageUrl = (storagePath: string) => {
     return outputUrls[storagePath] || ''
   }
@@ -252,6 +318,12 @@ export default function OutputsPage() {
         </div>
 
         {/* Filter bar */}
+        {error && (
+          <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-700 shadow-sm">
+            {error}
+          </div>
+        )}
+
         <div className="mb-6 rounded-[1.4rem] border border-slate-200/80 bg-white/88 p-5 shadow-[0_18px_55px_rgba(15,23,42,0.05)] backdrop-blur">
           <div className="flex flex-wrap items-end gap-4">
             {/* Category */}
@@ -359,6 +431,13 @@ export default function OutputsPage() {
             >
               {downloadingSelected ? text.downloading : text.downloadSelected(selected.size)}
             </button>
+            <button
+              onClick={deleteSelectedOutputs}
+              disabled={selected.size === 0 || deletingSelected}
+              className="rounded-xl border border-red-200 bg-white/90 px-5 py-2 text-sm font-semibold text-red-600 shadow-sm hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {deletingSelected ? text.deleting : text.deleteSelected(selected.size)}
+            </button>
           </div>
         </div>
 
@@ -414,16 +493,31 @@ export default function OutputsPage() {
                   </div>
                 </div>
 
-                {/* Download button overlay */}
-                <button
-                  onClick={() => handleDownload(output)}
-                  className="absolute right-2 top-2 rounded-md bg-white/90 p-1.5 text-gray-600 shadow-sm opacity-0 transition-opacity hover:bg-white hover:text-gray-900 group-hover:opacity-100"
-                  title={text.download}
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
-                  </svg>
-                </button>
+                <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <button
+                    onClick={() => handleDownload(output)}
+                    className="rounded-md bg-white/90 p-1.5 text-gray-600 shadow-sm hover:bg-white hover:text-gray-900"
+                    title={text.download}
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => deleteOutput(output)}
+                    disabled={deletingId === output.id}
+                    className="rounded-md bg-white/90 p-1.5 text-red-600 shadow-sm hover:bg-red-50 disabled:opacity-50"
+                    title={text.delete}
+                  >
+                    {deletingId === output.id ? (
+                      <span className="block h-4 w-4 animate-pulse text-xs">...</span>
+                    ) : (
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-8 0l1 12a2 2 0 002 2h4a2 2 0 002-2l1-12" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
               </div>
             ))}
           </div>

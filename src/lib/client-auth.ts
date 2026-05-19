@@ -41,7 +41,7 @@ export async function persistAuthorizedSession(accessToken: string) {
   }
 }
 
-export async function signOutAndRedirectToLogin(reason = UNAUTHORIZED_LOGIN_REASON) {
+export async function signOutAndRedirectToLogin(reason?: string | null) {
   try {
     await supabase.auth.signOut({ scope: 'global' })
   } catch {
@@ -59,6 +59,7 @@ export async function signOutAndRedirectToLogin(reason = UNAUTHORIZED_LOGIN_REAS
   }
 
   if (typeof window !== 'undefined') {
-    window.location.replace(`/login?reason=${encodeURIComponent(reason)}`)
+    const reasonQuery = reason ? `?reason=${encodeURIComponent(reason)}` : ''
+    window.location.replace(`/login${reasonQuery}`)
   }
 }

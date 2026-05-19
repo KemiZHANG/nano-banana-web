@@ -7,7 +7,9 @@ import PaginationBar from '@/components/PaginationBar'
 import SignedImage from '@/components/SignedImage'
 import { apiFetch } from '@/lib/api'
 import { subscribeToTableChanges } from '@/lib/client-realtime'
+import { runSafeSoftRefresh, useSafeAutoRefresh } from '@/lib/safe-soft-refresh'
 import { supabase } from '@/lib/supabase'
+import { startTaskNavigationWatch } from '@/lib/task-navigation'
 import { getCategoryDisplayName, pickText, useUiLanguage } from '@/lib/ui-language'
 import { signStorageUrls } from '@/lib/signed-storage'
 import {
@@ -367,7 +369,7 @@ export default function ProductDashboardPage() {
         delete: 'Delete',
         uploadSourceImages: 'Upload images',
         generateCopy: 'Generate copy',
-        regenerateCopy: 'Regenerate copy',
+        regenerateCopy: 'Add copy',
         close: 'Close',
       }
     : {
@@ -418,7 +420,7 @@ export default function ProductDashboardPage() {
         delete: '删除',
         uploadSourceImages: '上传原图',
         generateCopy: '生成副本',
-        regenerateCopy: '重新生成副本',
+        regenerateCopy: '新增副本',
         close: '关闭',
       }
 
@@ -484,6 +486,11 @@ export default function ProductDashboardPage() {
   }, [products])
 
   const pagedProducts = products
+  const editingProduct = useMemo(
+    () => products.find((product) => product.id === form.id) || null,
+    [form.id, products]
+  )
+  const existingSourceImages = editingProduct?.images || []
 
   useEffect(() => {
     setProductPage(1)
@@ -500,7 +507,7 @@ export default function ProductDashboardPage() {
 
     async function loadPageImageUrls() {
       const paths = pagedProducts.flatMap((product) =>
-        (product.images || []).slice(0, 4).map((image) => image.storage_path)
+        (product.images || []).map((image) => image.storage_path)
       )
 
       try {
@@ -522,31 +529,7 @@ export default function ProductDashboardPage() {
     }
   }, [pagedProducts])
 
-  useEffect(() => {
-    if (loading) return
-
-    const handleWindowFocus = () => {
-      void fetchAll()
-    }
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        void fetchAll()
-      }
-    }
-
-    window.addEventListener('focus', handleWindowFocus)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    const intervalId = window.setInterval(() => {
-      void fetchAll()
-    }, AUTO_REFRESH_INTERVAL_MS)
-
-    return () => {
-      window.clearInterval(intervalId)
-      window.removeEventListener('focus', handleWindowFocus)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-    }
-  }, [fetchAll, loading])
+  useSafeAutoRefresh(fetchAll, { enabled: !loading, intervalMs: AUTO_REFRESH_INTERVAL_MS })
 
   useEffect(() => {
     if (loading) return
@@ -559,7 +542,7 @@ export default function ProductDashboardPage() {
         { table: 'product_copies' },
       ],
       () => {
-        void fetchAll()
+        runSafeSoftRefresh(fetchAll)
       },
       { debounceMs: 500 }
     )
@@ -830,7 +813,13 @@ export default function ProductDashboardPage() {
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) throw new Error(data?.error || '创建生成任务失败')
-      router.push('/product-outputs')
+      startTaskNavigationWatch({
+        kind: 'product_copy',
+        taskIds: Array.isArray(data?.copy_ids) ? data.copy_ids : [],
+        resultPath: '/product-outputs',
+        resultLabel: '商品副本输出',
+      })
+      router.push('/tasks')
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建生成任务失败')
     } finally {
@@ -1086,7 +1075,7 @@ export default function ProductDashboardPage() {
                           ? text.missingSourceImages
                           : product.copy_count_generated
                             ? pickText(language, {
-                                zh: `已生成 ${product.copy_count_generated} 个副本，可重新生成`,
+                                zh: `已生成 ${product.copy_count_generated} 个副本，可继续新增`,
                                 en: `${product.copy_count_generated} copies generated`,
                               })
                             : product.status}
@@ -1094,13 +1083,6 @@ export default function ProductDashboardPage() {
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex gap-2">
-                        <button
-                          onClick={() => handleGenerate([product.id])}
-                          disabled={generating}
-                          className="rounded-lg px-2 py-1 text-sm font-semibold text-emerald-600 hover:bg-emerald-50 hover:text-emerald-800 disabled:text-slate-300"
-                        >
-                          {product.copy_count_generated ? text.regenerateCopy : text.generateCopy}
-                        </button>
                         <button onClick={() => openEdit(product)} className="rounded-lg px-2 py-1 text-sm font-semibold text-blue-600 hover:bg-blue-50 hover:text-blue-800">{text.edit}</button>
                         <button onClick={() => handleDelete(product)} className="rounded-lg px-2 py-1 text-sm font-semibold text-red-600 hover:bg-red-50 hover:text-red-800">{text.delete}</button>
                       </div>
@@ -1264,6 +1246,29 @@ export default function ProductDashboardPage() {
                         </button>
                       </span>
                     ))}
+                  </div>
+                )}
+                {existingSourceImages.length > 0 && (
+                  <div className="mt-4">
+                    <div className="mb-2 text-sm font-semibold text-slate-700">
+                      {pickText(language, { zh: '已上传的原始参考图', en: 'Uploaded reference images' })}
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                      {existingSourceImages.map((image) => (
+                        <article key={image.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-2">
+                          <SignedImage
+                            src={imageUrls[image.storage_path]}
+                            alt={image.display_name}
+                            width={240}
+                            height={240}
+                            className="aspect-square w-full rounded-xl object-cover"
+                          />
+                          <p className="mt-2 truncate text-xs font-medium text-slate-600" title={image.display_name}>
+                            {image.display_name}
+                          </p>
+                        </article>
+                      ))}
+                    </div>
                   </div>
                 )}
               </label>

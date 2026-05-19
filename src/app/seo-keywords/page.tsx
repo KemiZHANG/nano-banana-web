@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import { apiFetch } from '@/lib/api'
 import { subscribeToTableChanges } from '@/lib/client-realtime'
+import { runSafeSoftRefresh, useSafeAutoRefresh } from '@/lib/safe-soft-refresh'
 import { supabase } from '@/lib/supabase'
 import { PRODUCT_LANGUAGES, type Category } from '@/lib/types'
 import { getCategoryDisplayName, pickText, useUiLanguage } from '@/lib/ui-language'
@@ -249,6 +250,8 @@ export default function SeoKeywordsPage() {
     if (!loading) void fetchData()
   }, [loading, fetchData])
 
+  useSafeAutoRefresh(fetchData, { enabled: !loading })
+
   useEffect(() => {
     if (loading) return
 
@@ -259,7 +262,7 @@ export default function SeoKeywordsPage() {
         { table: 'categories' },
       ],
       () => {
-        void fetchData()
+        runSafeSoftRefresh(fetchData)
       },
       { debounceMs: 500 }
     )

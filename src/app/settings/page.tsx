@@ -13,7 +13,7 @@ type ImageProvider = 'gemini' | 'openai'
 
 export default function SettingsPage() {
   const router = useRouter()
-  const { language } = useUiLanguage()
+  const { edition, language } = useUiLanguage()
   const [loading, setLoading] = useState(true)
   const [settings, setSettings] = useState<SystemSettings | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -231,18 +231,22 @@ export default function SettingsPage() {
     )
   }
 
+  const isResume = edition === 'resume'
   const isEmailAuthorized = Boolean(settings?.builtin_key_email_authorized)
   const isAdmin = Boolean(settings?.is_admin)
   const staffLocked = isEmailAuthorized && !isAdmin
   const passwordVerified = Boolean(settings?.use_builtin_key && settings?.builtin_key_password_verified)
   const hasOwnGemini = Boolean(settings?.gemini_api_key_encrypted && settings.gemini_api_key_valid !== false)
   const hasOwnOpenAI = Boolean(settings?.openai_api_key_encrypted && settings.openai_api_key_valid !== false)
-  const canUseBuiltInAll = isAdmin || passwordVerified
-  const canUseGemini = canUseBuiltInAll || staffLocked || hasOwnGemini
-  const canUseOpenAI = canUseBuiltInAll || hasOwnOpenAI
+  const canUseBuiltInAll = isResume || isAdmin || passwordVerified
+  const canUseGemini = isResume || canUseBuiltInAll || staffLocked || hasOwnGemini
+  const canUseOpenAI = hasOwnOpenAI || (!isResume && canUseBuiltInAll)
   const currentProvider = staffLocked ? 'gemini' : imageProvider
   const currentMode = staffLocked ? 'batch' : generationMode
   const providerDisplayName = currentProvider === 'openai' ? 'OpenAI GPT Image 2' : 'Gemini 2.5 Flash Image'
+  const trialLimit = settings?.resume_trial_limit ?? 5
+  const trialUsed = settings?.resume_trial_used ?? 0
+  const trialRemaining = settings?.resume_trial_remaining ?? Math.max(trialLimit - trialUsed, 0)
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_12%_0%,rgba(250,204,21,0.14),transparent_30%),radial-gradient(circle_at_88%_8%,rgba(37,99,235,0.12),transparent_34%),linear-gradient(180deg,#ffffff_0%,#f8fafc_46%,#eef2f7_100%)]">
@@ -279,32 +283,52 @@ export default function SettingsPage() {
 
             {!isAdmin && !staffLocked && (
               <div className="space-y-5">
-                <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
-                  <h4 className="text-sm font-medium text-gray-900">{text.methodOne}</h4>
-                  <p className="mt-1 text-xs leading-5 text-gray-500">{text.methodOneHint}</p>
-                  <div className="mt-3 flex items-end gap-3">
-                    <div className="flex-1">
-                      <label className="mb-1 block text-sm font-medium text-gray-700">{text.accessPassword}</label>
-                      <input
-                        type="password"
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        placeholder={text.accessPasswordPlaceholder}
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      />
-                    </div>
-                    <button
-                      onClick={handleVerifyBuiltin}
-                      disabled={verifying}
-                      className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      {verifying ? text.verifying : text.verify}
-                    </button>
+                {isResume ? (
+                  <div className="rounded-md border border-blue-200 bg-blue-50 p-4">
+                    <h4 className="text-sm font-medium text-blue-950">
+                      {pickText(language, { zh: '公开演示内置 Gemini 试用', en: 'Public Gemini trial' })}
+                    </h4>
+                    <p className="mt-1 text-xs leading-5 text-blue-800">
+                      {pickText(language, {
+                        zh: '每个账号可以使用内置 Gemini Key 进行少量试用。额度用完后，可以在下面保存自己的 API Key 继续使用。',
+                        en: 'Each account can use the built-in Gemini key for a small trial. After the quota is used, save your own API key below to continue.',
+                      })}
+                    </p>
+                    <p className="mt-2 text-xs font-semibold text-blue-900">
+                      {pickText(language, {
+                        zh: `已用 ${trialUsed} / ${trialLimit} 次，剩余 ${trialRemaining} 次。`,
+                        en: `${trialUsed} / ${trialLimit} used, ${trialRemaining} remaining.`,
+                      })}
+                    </p>
                   </div>
-                  {passwordVerified && (
-                    <p className="mt-2 text-xs font-medium text-green-600">{text.verified}</p>
+                ) : (
+                  <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
+                    <h4 className="text-sm font-medium text-gray-900">{text.methodOne}</h4>
+                    <p className="mt-1 text-xs leading-5 text-gray-500">{text.methodOneHint}</p>
+                    <div className="mt-3 flex items-end gap-3">
+                      <div className="flex-1">
+                        <label className="mb-1 block text-sm font-medium text-gray-700">{text.accessPassword}</label>
+                        <input
+                          type="password"
+                          value={password}
+                          onChange={(event) => setPassword(event.target.value)}
+                          placeholder={text.accessPasswordPlaceholder}
+                          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                      <button
+                        onClick={handleVerifyBuiltin}
+                        disabled={verifying}
+                        className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {verifying ? text.verifying : text.verify}
+                      </button>
+                    </div>
+                    {passwordVerified && (
+                      <p className="mt-2 text-xs font-medium text-green-600">{text.verified}</p>
+                    )}
+                  </div>
                   )}
-                </div>
 
                 <div className="rounded-md border border-gray-200 bg-white p-4">
                   <h4 className="text-sm font-medium text-gray-900">{text.methodTwo}</h4>

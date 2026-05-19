@@ -7,6 +7,7 @@ import Navbar from '@/components/Navbar'
 import StorageImage from '@/components/StorageImage'
 import { apiFetch } from '@/lib/api'
 import { subscribeToTableChanges } from '@/lib/client-realtime'
+import { runSafeSoftRefresh, useSafeAutoRefresh } from '@/lib/safe-soft-refresh'
 import { supabase } from '@/lib/supabase'
 import { sanitizeListingText } from '@/lib/listing-text'
 import { signStorageUrl, signStorageUrls } from '@/lib/signed-storage'
@@ -22,6 +23,14 @@ const REGENERATION_PRESETS = [
 
 const AUTO_REFRESH_INTERVAL_MS = 45 * 1000
 
+const LISTING_STATUS_OPTIONS = [
+  { value: 'not_listed', zh: '未上品', en: 'Not listed' },
+  { value: 'listed', zh: '已上品', en: 'Listed' },
+  { value: 'needs_edit', zh: '需修改', en: 'Needs edit' },
+  { value: 'paused', zh: '暂停', en: 'Paused' },
+  { value: 'done', zh: '已完成', en: 'Done' },
+] as const
+
 type FileWritableLike = {
   write: (data: Blob) => Promise<void>
   close: () => Promise<void>
@@ -33,6 +42,13 @@ type FileHandleLike = {
 
 type DirectoryHandleLike = {
   getFileHandle: (name: string, options: { create: boolean }) => Promise<FileHandleLike>
+}
+
+type ListingDraft = {
+  listing_status: string
+  store_name: string
+  listed_at: string
+  operator_note: string
 }
 
 type FilePickerWindow = Window & typeof globalThis & {
@@ -73,6 +89,14 @@ function imageStatusTone(image: ProductCopyImage) {
   return 'bg-blue-50 text-blue-700 ring-blue-100'
 }
 
+function toDatetimeLocal(value: string | null | undefined) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
+}
+
 export default function ProductOutputDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -87,6 +111,13 @@ export default function ProductOutputDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [downloadingAll, setDownloadingAll] = useState(false)
+  const [listingDraft, setListingDraft] = useState<ListingDraft>({
+    listing_status: 'not_listed',
+    store_name: '',
+    listed_at: '',
+    operator_note: '',
+  })
+  const [savingListing, setSavingListing] = useState(false)
   const text = {
     loading: pickText(language, { zh: '加载中...', en: 'Loading...' }),
     notFound: pickText(language, { zh: '未找到副本。', en: 'Copy not found.' }),
@@ -117,6 +148,20 @@ export default function ProductOutputDetailPage() {
     queued: pickText(language, { zh: '排队中...', en: 'Queued...' }),
     regenerateOne: pickText(language, { zh: '只重生这一张', en: 'Regenerate only this image' }),
     downloadCurrent: pickText(language, { zh: '下载当前图', en: 'Download current image' }),
+    listingPanel: pickText(language, { zh: '上品处理', en: 'Listing workflow' }),
+    listingPanelHint: pickText(language, { zh: '这里记录这个副本是否已经上品、上到哪家店，以及员工备注。', en: 'Record listing status, store, listed time, and operator notes.' }),
+    listingStatus: pickText(language, { zh: '上品状态', en: 'Listing status' }),
+    storeName: pickText(language, { zh: '店铺名', en: 'Store name' }),
+    listedAt: pickText(language, { zh: '上品时间', en: 'Listed time' }),
+    operatorNote: pickText(language, { zh: '员工备注', en: 'Operator note' }),
+    operator: pickText(language, { zh: '操作者', en: 'Operator' }),
+    unrecorded: pickText(language, { zh: '未记录', en: 'Not recorded' }),
+    saveListing: pickText(language, { zh: '保存上品信息', en: 'Save listing info' }),
+    savingListing: pickText(language, { zh: '保存中...', en: 'Saving...' }),
+    listingSaved: pickText(language, { zh: '上品信息已保存。', en: 'Listing info saved.' }),
+    listingSaveError: pickText(language, { zh: '上品信息保存失败', en: 'Failed to save listing info' }),
+    storePlaceholder: pickText(language, { zh: '例如：Shopee MY 店铺 A', en: 'For example: Shopee MY Store A' }),
+    operatorNotePlaceholder: pickText(language, { zh: '例如：已上到店铺 A / 标题需要改短 / 图片 3 重生后再上架', en: 'For example: listed to Store A / shorten title / regenerate image 3 before listing' }),
   }
 
   useEffect(() => {
@@ -135,6 +180,12 @@ export default function ProductOutputDetailPage() {
     }
 
     setCopy(data)
+    setListingDraft({
+      listing_status: data.listing_status || 'not_listed',
+      store_name: data.store_name || '',
+      listed_at: toDatetimeLocal(data.listed_at),
+      operator_note: data.operator_note || data.staff_note || '',
+    })
 
     const outputPaths: string[] = Array.from(new Set<string>(
       (data.product_copy_images || []).flatMap((image: ProductCopyImage) => [
@@ -159,31 +210,7 @@ export default function ProductOutputDetailPage() {
     if (!loading) fetchCopy()
   }, [loading, fetchCopy])
 
-  useEffect(() => {
-    if (loading) return
-
-    const handleWindowFocus = () => {
-      void fetchCopy()
-    }
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        void fetchCopy()
-      }
-    }
-
-    window.addEventListener('focus', handleWindowFocus)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    const intervalId = window.setInterval(() => {
-      void fetchCopy()
-    }, AUTO_REFRESH_INTERVAL_MS)
-
-    return () => {
-      window.clearInterval(intervalId)
-      window.removeEventListener('focus', handleWindowFocus)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-    }
-  }, [fetchCopy, loading])
+  useSafeAutoRefresh(fetchCopy, { enabled: !loading, intervalMs: AUTO_REFRESH_INTERVAL_MS })
 
   useEffect(() => {
     if (loading) return
@@ -197,7 +224,7 @@ export default function ProductOutputDetailPage() {
         { table: 'product_images' },
       ],
       () => {
-        void fetchCopy()
+        runSafeSoftRefresh(fetchCopy)
       },
       { debounceMs: 500 }
     )
@@ -361,6 +388,32 @@ export default function ProductOutputDetailPage() {
     setBusyKey(null)
   }
 
+  const saveListingInfo = async () => {
+    setSavingListing(true)
+    setError(null)
+    setNotice(null)
+
+    const res = await apiFetch(`/api/product-copies/${copyId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        listing_status: listingDraft.listing_status,
+        store_name: listingDraft.store_name,
+        listed_at: listingDraft.listed_at || null,
+        operator_note: listingDraft.operator_note,
+      }),
+    })
+    const data = await res.json().catch(() => null)
+
+    if (!res.ok) {
+      setError(data?.error || text.listingSaveError)
+    } else {
+      setNotice(text.listingSaved)
+      await fetchCopy()
+    }
+    setSavingListing(false)
+  }
+
   if (loading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">{text.loading}</div>
   }
@@ -419,6 +472,65 @@ export default function ProductOutputDetailPage() {
                     <button onClick={() => copyText(cleanDescription)} className="text-xs font-medium text-blue-600">{text.copy}</button>
                   </div>
                   <pre className="max-h-[560px] overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">{cleanDescription || text.pending}</pre>
+                </div>
+
+                <div className="rounded-[1.4rem] border border-slate-200/80 bg-white/90 p-5 shadow-[0_18px_55px_rgba(15,23,42,0.05)] backdrop-blur">
+                  <div className="mb-4">
+                    <h2 className="text-sm font-semibold text-slate-900">{text.listingPanel}</h2>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{text.listingPanelHint}</p>
+                  </div>
+                  <div className="grid gap-3">
+                    <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                      {text.listingStatus}
+                      <select
+                        value={listingDraft.listing_status}
+                        onChange={(event) => setListingDraft((previous) => ({ ...previous, listing_status: event.target.value }))}
+                        className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                      >
+                        {LISTING_STATUS_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{pickText(language, { zh: option.zh, en: option.en })}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                      {text.storeName}
+                      <input
+                        value={listingDraft.store_name}
+                        onChange={(event) => setListingDraft((previous) => ({ ...previous, store_name: event.target.value }))}
+                        className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                        placeholder={text.storePlaceholder}
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                      {text.listedAt}
+                      <input
+                        type="datetime-local"
+                        value={listingDraft.listed_at}
+                        onChange={(event) => setListingDraft((previous) => ({ ...previous, listed_at: event.target.value }))}
+                        className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                      {text.operatorNote}
+                      <textarea
+                        value={listingDraft.operator_note}
+                        onChange={(event) => setListingDraft((previous) => ({ ...previous, operator_note: event.target.value }))}
+                        rows={4}
+                        className="rounded-xl border border-slate-300 px-3 py-2 text-sm leading-6 text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                        placeholder={text.operatorNotePlaceholder}
+                      />
+                    </label>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="text-xs text-slate-500">{text.operator}：{copy.operator_email || text.unrecorded}</div>
+                      <button
+                        onClick={saveListingInfo}
+                        disabled={savingListing}
+                        className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:bg-slate-300"
+                      >
+                        {savingListing ? text.savingListing : text.saveListing}
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="rounded-[1.4rem] border border-slate-200/80 bg-white/90 p-5 shadow-[0_18px_55px_rgba(15,23,42,0.05)] backdrop-blur">

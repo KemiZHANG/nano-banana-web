@@ -5,6 +5,8 @@ import { encodeStoredGeminiSettings, isValidGeminiApiKey, parseStoredGeminiSetti
 import { getBuiltinKeyAuthorization } from '@/lib/builtin-key-access'
 import { isAdminEmail } from '@/lib/admin'
 import { isValidOpenAIApiKey } from '@/lib/openai-image'
+import { isResumeEdition } from '@/lib/app-edition'
+import { buildResumeTrialStatus } from '@/lib/resume-trial'
 
 async function withGenerationMode<T extends {
   gemini_api_key_encrypted: string | null
@@ -16,12 +18,13 @@ async function withGenerationMode<T extends {
   const hasValidStoredKey = isValidGeminiApiKey(stored.apiKey)
   const hasStoredOpenAIKey = Boolean(stored.openaiApiKey)
   const hasValidStoredOpenAIKey = isValidOpenAIApiKey(stored.openaiApiKey)
-  const authorization = await getBuiltinKeyAuthorization(email)
-  const admin = isAdminEmail(email)
-  const emailAuthorized = Boolean(authorization?.active)
+  const authorization = isResumeEdition() ? null : await getBuiltinKeyAuthorization(email)
+  const admin = isResumeEdition() ? false : isAdminEmail(email)
+  const emailAuthorized = isResumeEdition() ? false : Boolean(authorization?.active)
   const lockedToStaffBatch = emailAuthorized && !admin
   const generationMode = lockedToStaffBatch ? 'batch' : (stored.generationMode === 'direct' ? 'direct' : 'batch')
   const imageProvider = lockedToStaffBatch ? 'gemini' : (stored.imageProvider === 'openai' ? 'openai' : 'gemini')
+  const resumeTrial = isResumeEdition() ? buildResumeTrialStatus(settings.gemini_api_key_encrypted) : null
 
   return {
     ...settings,
@@ -34,6 +37,9 @@ async function withGenerationMode<T extends {
     builtin_key_email_authorized: emailAuthorized,
     builtin_key_authorization_note: authorization?.note || null,
     is_admin: admin,
+    resume_trial_limit: resumeTrial?.limit,
+    resume_trial_used: resumeTrial?.used,
+    resume_trial_remaining: resumeTrial?.remaining,
   }
 }
 
@@ -60,7 +66,7 @@ export async function GET(request: NextRequest) {
       .insert({
         user_id: user.id,
         gemini_api_key_encrypted: null,
-        use_builtin_key: false,
+        use_builtin_key: isResumeEdition(),
         builtin_key_password_verified: false,
       })
       .select()
@@ -103,9 +109,9 @@ export async function PUT(request: NextRequest) {
 
   const currentStored = parseStoredGeminiSettings(existingSettings?.gemini_api_key_encrypted)
   const admin = isAdminEmail(user.email)
-  const authorization = await getBuiltinKeyAuthorization(user.email)
+  const authorization = isResumeEdition() ? null : await getBuiltinKeyAuthorization(user.email)
   const emailAuthorized = Boolean(authorization?.active)
-  const lockedToStaffBatch = emailAuthorized && !admin
+  const lockedToStaffBatch = !isResumeEdition() && emailAuthorized && !admin
 
   if (lockedToStaffBatch && generation_mode === 'direct') {
     return NextResponse.json({
@@ -156,12 +162,14 @@ export async function PUT(request: NextRequest) {
         : image_provider !== undefined
           ? (image_provider === 'openai' ? 'openai' : 'gemini')
           : currentStored.imageProvider,
+      resumeTrialUsed: currentStored.resumeTrialUsed,
+      resumeTrialUpdatedAt: currentStored.resumeTrialUpdatedAt,
     })
   }
 
   if (use_builtin_key !== undefined) {
-    updateData.use_builtin_key = use_builtin_key
-    if (!use_builtin_key) {
+    updateData.use_builtin_key = isResumeEdition() ? true : use_builtin_key
+    if (!use_builtin_key && !isResumeEdition()) {
       updateData.builtin_key_password_verified = false
     }
   }

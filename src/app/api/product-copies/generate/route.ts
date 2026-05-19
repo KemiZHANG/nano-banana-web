@@ -24,6 +24,8 @@ import { AI_ACCESS_ERROR, getGenerationAccess } from '@/lib/generation-access'
 import { getWorkspaceContext, getWorkspaceSupabase } from '@/lib/workspace'
 import { analyzeProductCopyQuality } from '@/lib/product-quality'
 import { softenComplianceRiskText } from '@/lib/listing-text'
+import { isResumeEdition } from '@/lib/app-edition'
+import { consumeResumeTrial, needsResumeBuiltinTrial, RESUME_TRIAL_ERROR_CODE } from '@/lib/resume-trial'
 import {
   SHOPEE_CATEGORY_ATTRIBUTE_KEY,
   decodeShopeeCategorySelection,
@@ -147,6 +149,10 @@ async function getTextGenerationApiKey(
     .maybeSingle()
 
   const stored = parseStoredGeminiSettings(settings?.gemini_api_key_encrypted)
+  if (isResumeEdition()) {
+    return stored.apiKey || readBuiltinGeminiApiKey() || null
+  }
+
   const admin = isAdminEmail(userEmail)
   const emailAuthorized = await isBuiltinKeyEmailAuthorized(userEmail)
   const passwordVerified = Boolean(settings?.use_builtin_key && settings?.builtin_key_password_verified)
@@ -232,6 +238,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: AI_ACCESS_ERROR, code: 'AI_ACCESS_REQUIRED' }, { status: 403 })
   }
 
+  if (needsResumeBuiltinTrial(access, 'gemini')) {
+    const trial = await consumeResumeTrial(supabase, user.id, 1)
+    if (!trial.allowed) {
+      return NextResponse.json({
+        error: trial.error,
+        code: trial.code || RESUME_TRIAL_ERROR_CODE,
+        trial: trial.status,
+      }, { status: 403 })
+    }
+  }
+
   const { data: rules } = await supabase
     .from('rule_templates')
     .select('name,content,active')
@@ -299,11 +316,23 @@ export async function POST(request: NextRequest) {
       }
     }).map((prompt) => [prompt.prompt_role, prompt]))
 
-    await supabase.from('product_copies').delete().eq('product_id', product.id)
-
     const copyPlan = parseLanguageCopyPlan(product)
+    const { data: existingCopies } = await supabase
+      .from('product_copies')
+      .select('language_code,copy_index')
+      .eq('workspace_key', workspaceKey)
+      .eq('product_id', product.id)
+    const nextCopyIndexByLanguage = new Map<string, number>()
+    for (const existingCopy of existingCopies || []) {
+      const languageCode = String(existingCopy.language_code || '')
+      const copyIndex = Math.max(0, Math.floor(Number(existingCopy.copy_index || 0)))
+      nextCopyIndexByLanguage.set(languageCode, Math.max(nextCopyIndexByLanguage.get(languageCode) || 1, copyIndex + 1))
+    }
+
     let productHasImageJobs = false
-    for (const { languageCode, copyIndex, imageRoles } of copyPlan) {
+    for (const { languageCode, imageRoles } of copyPlan) {
+      const copyIndex = nextCopyIndexByLanguage.get(languageCode) || 1
+      nextCopyIndexByLanguage.set(languageCode, copyIndex + 1)
       const languageLabel = getLanguageLabel(languageCode)
       const hasSourceImages = (product.images || []).length > 0
       const selectedPromptTemplates = imageRoles

@@ -6,6 +6,7 @@ import Navbar from '@/components/Navbar'
 import PaginationBar from '@/components/PaginationBar'
 import { apiFetch } from '@/lib/api'
 import { subscribeToTableChanges } from '@/lib/client-realtime'
+import { runSafeSoftRefresh, useSafeAutoRefresh } from '@/lib/safe-soft-refresh'
 import { supabase } from '@/lib/supabase'
 import type { RuleTemplate } from '@/lib/types'
 import { pickText, useUiLanguage } from '@/lib/ui-language'
@@ -98,13 +99,15 @@ export default function RulesPage() {
     if (!loading) void fetchRules()
   }, [loading, fetchRules])
 
+  useSafeAutoRefresh(fetchRules, { enabled: !loading })
+
   useEffect(() => {
     if (loading) return
     return subscribeToTableChanges(
       'rules-page-realtime',
       [{ table: 'rule_templates' }],
       () => {
-        void fetchRules()
+        runSafeSoftRefresh(fetchRules)
       },
       { debounceMs: 500 }
     )

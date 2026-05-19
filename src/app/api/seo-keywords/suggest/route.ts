@@ -6,6 +6,8 @@ import { PRODUCT_LANGUAGES } from '@/lib/types'
 import { normalizeSeoKeywords, type SeoKeyword, type SeoKeywordType } from '@/lib/seo-keywords'
 import { AI_ACCESS_ERROR, getGenerationAccess } from '@/lib/generation-access'
 import { getWorkspaceContext, getWorkspaceSupabase } from '@/lib/workspace'
+import { isResumeEdition } from '@/lib/app-edition'
+import { consumeResumeTrial, needsResumeBuiltinTrial, RESUME_TRIAL_ERROR_CODE } from '@/lib/resume-trial'
 
 type KeywordPayload = {
   keywords?: Array<Partial<SeoKeyword> & { type?: SeoKeywordType }>
@@ -23,6 +25,10 @@ async function getTextGenerationApiKey(
     .maybeSingle()
 
   const stored = parseStoredGeminiSettings(settings?.gemini_api_key_encrypted)
+  if (isResumeEdition()) {
+    return stored.apiKey || readBuiltinGeminiApiKey() || null
+  }
+
   const admin = isAdminEmail(userEmail)
   const emailAuthorized = await isBuiltinKeyEmailAuthorized(userEmail)
   const passwordVerified = Boolean(settings?.use_builtin_key && settings?.builtin_key_password_verified)
@@ -68,6 +74,17 @@ export async function POST(request: NextRequest) {
   const access = await getGenerationAccess(supabase, user.id, user.email)
   if (!access.allowed) {
     return NextResponse.json({ error: AI_ACCESS_ERROR, code: 'AI_ACCESS_REQUIRED' }, { status: 403 })
+  }
+
+  if (needsResumeBuiltinTrial(access, 'gemini')) {
+    const trial = await consumeResumeTrial(supabase, user.id, 1)
+    if (!trial.allowed) {
+      return NextResponse.json({
+        error: trial.error,
+        code: trial.code || RESUME_TRIAL_ERROR_CODE,
+        trial: trial.status,
+      }, { status: 403 })
+    }
   }
 
   const body = await request.json()

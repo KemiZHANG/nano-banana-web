@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { AI_ACCESS_ERROR, getGenerationAccess } from '@/lib/generation-access'
 import { logServerEvent } from '@/lib/observability'
 import { getWorkspaceContext, getWorkspaceSupabase } from '@/lib/workspace'
+import { consumeResumeTrial, needsResumeBuiltinTrial, RESUME_TRIAL_ERROR_CODE } from '@/lib/resume-trial'
 
 type CopyImageRow = {
   id: string
@@ -20,6 +21,17 @@ export async function POST(request: NextRequest) {
   const access = await getGenerationAccess(supabase, user.id, user.email)
   if (!access.allowed) {
     return NextResponse.json({ error: AI_ACCESS_ERROR, code: 'AI_ACCESS_REQUIRED' }, { status: 403 })
+  }
+
+  if (needsResumeBuiltinTrial(access, 'gemini')) {
+    const trial = await consumeResumeTrial(supabase, user.id, 1)
+    if (!trial.allowed) {
+      return NextResponse.json({
+        error: trial.error,
+        code: trial.code || RESUME_TRIAL_ERROR_CODE,
+        trial: trial.status,
+      }, { status: 403 })
+    }
   }
 
   const body = await request.json().catch(() => ({}))

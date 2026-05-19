@@ -22,6 +22,7 @@ export function getNavbarCopy(language: UiLanguage) {
     categories: language === 'en' ? 'Category Prompts' : '类目指令',
     productOutputs: language === 'en' ? 'Product Copy Outputs' : '商品副本输出',
     imageOutputs: language === 'en' ? 'Image Outputs' : '图片生成输出',
+    tasks: language === 'en' ? 'Task Center' : '任务中心',
     seoKeywords: language === 'en' ? 'SEO Keywords' : 'SEO 关键词库',
     rules: language === 'en' ? 'Rules' : '规则模板',
     settings: language === 'en' ? 'Settings' : '系统设置',

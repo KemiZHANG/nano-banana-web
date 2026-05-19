@@ -6,11 +6,10 @@ import { useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import { apiFetch } from '@/lib/api'
 import { subscribeToTableChanges } from '@/lib/client-realtime'
+import { runSafeSoftRefresh, useSafeAutoRefresh } from '@/lib/safe-soft-refresh'
 import PaginationBar from '@/components/PaginationBar'
-import StorageImage from '@/components/StorageImage'
 import { supabase } from '@/lib/supabase'
 import { sanitizeListingText } from '@/lib/listing-text'
-import { signStorageUrls } from '@/lib/signed-storage'
 import { pickText, useUiLanguage, type UiLanguage } from '@/lib/ui-language'
 import { PRODUCT_LANGUAGES, type ListingStatus } from '@/lib/types'
 import type { Category, ProductCopy, ProductCopyImage } from '@/lib/types'
@@ -41,13 +40,6 @@ const FILTERS: Array<{ value: WorkbenchFilter; zh: string; en: string }> = [
   { value: 'image_failed', zh: '图片失败', en: 'Image failed' },
 ]
 
-const REGENERATION_PRESETS = [
-  { zh: '更清晰', en: 'Sharper' },
-  { zh: '更像主图', en: 'More like main image' },
-  { zh: '不要改包装', en: 'Keep packaging unchanged' },
-  { zh: '背景更干净', en: 'Cleaner background' },
-]
-
 function statusMeta(status: string | null | undefined, language: UiLanguage) {
   const item = LISTING_STATUS_OPTIONS.find((option) => option.value === status) || LISTING_STATUS_OPTIONS[0]
   return {
@@ -57,33 +49,23 @@ function statusMeta(status: string | null | undefined, language: UiLanguage) {
   }
 }
 
-function imageStatusText(image: ProductCopyImage, language: UiLanguage) {
-  if (image.pending_storage_path) return pickText(language, { zh: '待确认新图', en: 'Pending review' })
-  if (image.status === 'completed') return pickText(language, { zh: '已完成', en: 'Completed' })
-  if (image.status === 'generating') return pickText(language, { zh: '生成中', en: 'Generating' })
-  if (image.status === 'queued') return pickText(language, { zh: '排队中', en: 'Queued' })
-  if (image.status === 'failed') return pickText(language, { zh: '失败', en: 'Failed' })
-  return pickText(language, { zh: '需检查', en: 'Needs review' })
+function copyStatusMeta(status: ProductCopy['status'] | null | undefined, language: UiLanguage) {
+  const options: Record<ProductCopy['status'], { zh: string; en: string; tone: string }> = {
+    queued: { zh: '排队中', en: 'Queued', tone: 'bg-blue-50 text-blue-700' },
+    generating: { zh: '生成中', en: 'Generating', tone: 'bg-sky-50 text-sky-700' },
+    completed: { zh: '已完成', en: 'Completed', tone: 'bg-emerald-50 text-emerald-700' },
+    failed: { zh: '生成失败', en: 'Failed', tone: 'bg-red-50 text-red-700' },
+    needs_review: { zh: '需检查', en: 'Needs review', tone: 'bg-amber-50 text-amber-700' },
+  }
+  const item = options[status || 'queued']
+  return {
+    label: pickText(language, { zh: item.zh, en: item.en }),
+    tone: item.tone,
+  }
 }
 
 function imageDoneCount(images: ProductCopyImage[]) {
   return images.filter((image) => image.status === 'completed' || Boolean(image.pending_storage_path)).length
-}
-
-function appendPreset(current: string, preset: string) {
-  if (!current.trim()) return preset
-  if (current.includes(preset)) return current
-  return `${current.trim()}，${preset}`
-}
-
-function getQualityReport(copy: ProductCopy) {
-  const report = (copy.quality_report || {}) as {
-    issues?: Array<{ label: string; message: string; severity?: string }>
-  }
-
-  return {
-    issues: Array.isArray(report.issues) ? report.issues : [],
-  }
 }
 
 export default function ProductOutputsPage() {
@@ -92,8 +74,6 @@ export default function ProductOutputsPage() {
   const [loading, setLoading] = useState(true)
   const [copies, setCopies] = useState<ProductCopy[]>([])
   const [categories, setCategories] = useState<Category[]>([])
-  const [imageUrls, setImageUrls] = useState<Record<string, string>>({})
-  const [regenerationNotes, setRegenerationNotes] = useState<Record<string, string>>({})
   const [sku, setSku] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [language, setLanguage] = useState('')
@@ -102,7 +82,6 @@ export default function ProductOutputsPage() {
   const [filter, setFilter] = useState<WorkbenchFilter>('all')
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [savingCopyId, setSavingCopyId] = useState<string | null>(null)
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [bulkStoreName, setBulkStoreName] = useState('')
@@ -171,19 +150,6 @@ export default function ProductOutputsPage() {
     })
   }, [router])
 
-  const signImageUrls = useCallback(async (rows: ProductCopy[]) => {
-    const paths = Array.from(new Set(rows.flatMap((copy) =>
-      (copy.product_copy_images || []).flatMap((image) => [
-        image.output_storage_path,
-        image.pending_storage_path,
-        image.previous_storage_path,
-      ].filter(Boolean) as string[])
-    )))
-
-    const urls = await signStorageUrls('outputs', paths)
-    setImageUrls((previous) => ({ ...previous, ...urls }))
-  }, [])
-
   const fetchCategories = useCallback(async () => {
     const res = await apiFetch('/api/categories')
     if (res.ok) setCategories(await res.json())
@@ -213,23 +179,6 @@ export default function ProductOutputsPage() {
     setFailedImageCopyIds(Array.isArray(data?.failedCopyIds) ? data.failedCopyIds : [])
     setSelectedIds((previous) => previous.filter((id) => rows.some((row) => row.id === id)))
   }, [categoryId, copyPage, date, filter, language, shopeeFilter, sku])
-
-  const updateCopy = async (copyId: string, patch: Partial<ProductCopy>) => {
-    setSavingCopyId(copyId)
-    setError(null)
-    const res = await apiFetch(`/api/product-copies/${copyId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
-    })
-    const data = await res.json().catch(() => null)
-    if (!res.ok) {
-      setError(data?.error || '保存失败')
-    } else {
-      setCopies((previous) => previous.map((copy) => copy.id === copyId ? { ...copy, ...data } : copy))
-    }
-    setSavingCopyId(null)
-  }
 
   const batchUpdateCopies = async (patch: Record<string, unknown>, key: string) => {
     if (selectedIds.length === 0) {
@@ -319,25 +268,6 @@ export default function ProductOutputsPage() {
     setBusyKey(null)
   }
 
-  const confirmPendingImage = async (imageId: string, action: 'accept' | 'discard') => {
-    setBusyKey(`${action}-${imageId}`)
-    setError(null)
-    setNotice(null)
-    const res = await apiFetch('/api/product-copy-images/confirm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_id: imageId, action }),
-    })
-    const data = await res.json().catch(() => null)
-    if (!res.ok) {
-      setError(data?.error || '确认图片失败')
-    } else {
-      setNotice(action === 'accept' ? '已保留新图。' : '已恢复旧图。')
-      await fetchCopies()
-    }
-    setBusyKey(null)
-  }
-
   useEffect(() => {
     if (!loading) {
       fetchCategories()
@@ -359,51 +289,7 @@ export default function ProductOutputsPage() {
     }
   }, [copyPage, copyTotalPages])
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadPageImageUrls() {
-      try {
-        await signImageUrls(copies)
-      } catch (err) {
-        if (!cancelled) {
-          setError((current) => current || (err instanceof Error ? err.message : '图片加载失败'))
-        }
-      }
-    }
-
-    void loadPageImageUrls()
-
-    return () => {
-      cancelled = true
-    }
-  }, [copies, signImageUrls])
-
-  useEffect(() => {
-    if (loading) return
-
-    const handleWindowFocus = () => {
-      void fetchCopies()
-    }
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        void fetchCopies()
-      }
-    }
-
-    window.addEventListener('focus', handleWindowFocus)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    const intervalId = window.setInterval(() => {
-      void fetchCopies()
-    }, AUTO_REFRESH_INTERVAL_MS)
-
-    return () => {
-      window.clearInterval(intervalId)
-      window.removeEventListener('focus', handleWindowFocus)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-    }
-  }, [fetchCopies, loading])
+  useSafeAutoRefresh(fetchCopies, { enabled: !loading, intervalMs: AUTO_REFRESH_INTERVAL_MS })
 
   useEffect(() => {
     if (loading) return
@@ -416,7 +302,7 @@ export default function ProductOutputsPage() {
         { table: 'products' },
       ],
       () => {
-        void fetchCopies()
+        runSafeSoftRefresh(fetchCopies)
       },
       { debounceMs: 500 }
     )
@@ -435,6 +321,26 @@ export default function ProductOutputsPage() {
       if (allVisibleSelected) return previous.filter((id) => !visibleIds.includes(id))
       return Array.from(new Set([...previous, ...visibleIds]))
     })
+  }
+
+  const deleteCopy = async (copy: ProductCopy) => {
+    if (!window.confirm(pickText(uiLanguage, {
+      zh: `确定删除 ${copy.sku} 的 ${copy.language_label}${copy.copy_index} 副本吗？`,
+      en: `Delete copy ${copy.language_label}${copy.copy_index} for ${copy.sku}?`,
+    }))) return
+
+    setBusyKey(`delete-${copy.id}`)
+    setError(null)
+    setNotice(null)
+    const res = await apiFetch(`/api/product-copies/${copy.id}`, { method: 'DELETE' })
+    const data = await res.json().catch(() => null)
+    setBusyKey(null)
+    if (!res.ok) {
+      setError(data?.error || pickText(uiLanguage, { zh: '删除副本失败', en: 'Failed to delete copy' }))
+      return
+    }
+    setNotice(pickText(uiLanguage, { zh: '副本已删除。', en: 'Copy deleted.' }))
+    await fetchCopies()
   }
 
   if (loading) {
@@ -600,244 +506,99 @@ export default function ProductOutputsPage() {
             <p className="mt-2 text-sm text-slate-500">{text.emptyDescription}</p>
           </div>
         ) : (
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className="space-y-3">
             {copies.map((copy) => {
               const product = copy.products
               const category = product?.categories
               const images = (copy.product_copy_images || []).sort((a, b) => a.prompt_number - b.prompt_number)
               const completedImages = imageDoneCount(images)
-              const failedImages = images.filter((image) => image.status === 'failed')
+              const listingStatus = statusMeta(copy.listing_status, uiLanguage)
+              const copyStatus = copyStatusMeta(copy.status, uiLanguage)
+              const cleanTitle = sanitizeListingText(copy.generated_title || product?.source_title)
               const shopeeCategory = formatShopeeCategorySelection(
                 decodeShopeeCategorySelection(product?.attributes?.[SHOPEE_CATEGORY_ATTRIBUTE_KEY])
               )
-              const listingStatus = statusMeta(copy.listing_status, uiLanguage)
-              const qualityReport = getQualityReport(copy)
-              const qualityIssues = qualityReport.issues
-              const cleanTitle = sanitizeListingText(copy.generated_title || product?.source_title)
-              const cleanDescription = sanitizeListingText(copy.generated_description || product?.source_description)
+              const listedStore = copy.listing_status === 'listed' ? (copy.store_name?.trim() || text.unrecorded) : ''
+              const operator = copy.operator_email || text.unrecorded
+              const createdAt = new Date(copy.created_at).toLocaleString()
 
               return (
-                <article key={copy.id} className="glass-surface soft-lift rounded-[1.25rem] p-4 transition-all hover:border-blue-300">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={selectedSet.has(copy.id)}
-                          onChange={() => toggleCopySelection(copy.id)}
-                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                          aria-label={text.selectSku(copy.sku)}
-                        />
-                        <div className="font-mono text-xl font-semibold text-slate-950">{copy.sku}</div>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2">
+                <article
+                  key={copy.id}
+                  className="glass-surface soft-lift h-[178px] overflow-hidden rounded-[1.25rem] p-4 transition-all hover:border-blue-300"
+                >
+                  <div className="flex h-full items-center gap-4">
+                    <input
+                      type="checkbox"
+                      checked={selectedSet.has(copy.id)}
+                      onChange={() => toggleCopySelection(copy.id)}
+                      className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      aria-label={text.selectSku(copy.sku)}
+                    />
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-2xl font-semibold tracking-tight text-slate-950">{copy.sku}</span>
                         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{copy.language_label}{copy.copy_index}</span>
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${copyStatus.tone}`}>{copyStatus.label}</span>
                         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${listingStatus.tone}`}>{listingStatus.label}</span>
                         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{text.imageCount(completedImages, images.length)}</span>
                       </div>
+
+                      <h2 className="mt-3 line-clamp-2 max-w-4xl text-lg font-semibold leading-7 text-slate-950" title={cleanTitle || undefined}>
+                        {cleanTitle || pickText(uiLanguage, { zh: '标题待生成', en: 'Title pending' })}
+                      </h2>
+
+                      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs font-medium text-slate-500">
+                        <span>{pickText(uiLanguage, { zh: '创建时间', en: 'Created' })}：{createdAt}</span>
+                        <span>{pickText(uiLanguage, { zh: '操作者', en: 'Operator' })}：{operator}</span>
+                        <span>{category ? `${category.icon} ${category.name_zh}` : text.unlinkedCategory}</span>
+                        <span className="max-w-full truncate">{text.shopeeCategory}：{shopeeCategory || text.notTagged}</span>
+                      </div>
                     </div>
-                    <div className="text-right text-xs text-slate-400">{new Date(copy.created_at).toLocaleString()}</div>
-                  </div>
 
-                  <div className="mt-3 text-xs text-slate-500">{category ? `${category.icon} ${category.name_zh}` : text.unlinkedCategory}</div>
-                  <div className="mt-2 rounded-xl bg-orange-50 px-3 py-2 text-xs font-semibold leading-5 text-orange-700 ring-1 ring-orange-100">
-                    {text.shopeeCategory}：{shopeeCategory || text.notTagged}
-                  </div>
-
-                  <h2 className="mt-3 line-clamp-2 text-sm font-semibold text-slate-900">
-                    {cleanTitle || pickText(uiLanguage, { zh: '标题待生成', en: 'Title pending' })}
-                  </h2>
-                  <p className="mt-2 line-clamp-4 whitespace-pre-line text-sm leading-6 text-slate-500">
-                    {cleanDescription || pickText(uiLanguage, { zh: '描述待生成', en: 'Description pending' })}
-                  </p>
-
-                  {qualityIssues.length > 0 && (
-                    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
-                      <div className="font-semibold">{pickText(uiLanguage, { zh: '质量检查提示', en: 'Quality checks' })}</div>
-                      {qualityIssues.slice(0, 4).map((item) => <div key={`${copy.id}-${item.label}`}>• {item.label}：{item.message}</div>)}
+                    <div className="hidden w-[520px] shrink-0 grid-cols-2 gap-2 xl:grid">
+                      <div className="rounded-2xl bg-white/80 px-4 py-3 ring-1 ring-slate-200/80">
+                        <div className="text-[11px] font-semibold text-slate-400">{pickText(uiLanguage, { zh: '商品状态', en: 'Copy status' })}</div>
+                        <div className="mt-1 truncate text-sm font-semibold text-slate-800">{copyStatus.label}</div>
+                      </div>
+                      <div className="rounded-2xl bg-white/80 px-4 py-3 ring-1 ring-slate-200/80">
+                        <div className="text-[11px] font-semibold text-slate-400">{pickText(uiLanguage, { zh: '上品状态', en: 'Listing' })}</div>
+                        <div className="mt-1 truncate text-sm font-semibold text-slate-800">
+                          {listedStore ? `${listingStatus.label} · ${listedStore}` : listingStatus.label}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl bg-white/80 px-4 py-3 ring-1 ring-slate-200/80">
+                        <div className="text-[11px] font-semibold text-slate-400">{pickText(uiLanguage, { zh: '副本语言', en: 'Language copy' })}</div>
+                        <div className="mt-1 truncate text-sm font-semibold text-slate-800">{copy.language_label}{copy.copy_index}</div>
+                      </div>
+                      <div className="rounded-2xl bg-white/80 px-4 py-3 ring-1 ring-slate-200/80">
+                        <div className="text-[11px] font-semibold text-slate-400">{pickText(uiLanguage, { zh: '图片数量', en: 'Images' })}</div>
+                        <div className="mt-1 truncate text-sm font-semibold text-slate-800">{text.imageCount(completedImages, images.length)}</div>
+                      </div>
+                      <div className="col-span-2 rounded-2xl bg-orange-50/80 px-4 py-2 ring-1 ring-orange-100">
+                        <div className="truncate text-xs font-semibold text-orange-700">
+                          {text.shopeeCategory}：{shopeeCategory || text.notTagged}
+                        </div>
+                      </div>
                     </div>
-                  )}
 
-                  <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 md:grid-cols-2">
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-semibold text-slate-500">{pickText(uiLanguage, { zh: '上品状态', en: 'Listing status' })}</span>
-                      <select
-                        value={copy.listing_status || 'not_listed'}
-                        onChange={(event) => updateCopy(copy.id, { listing_status: event.target.value as ListingStatus })}
-                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+                    <div className="flex shrink-0 flex-col gap-2">
+                      <Link
+                        href={`/product-outputs/${copy.id}`}
+                        className="inline-flex h-12 items-center justify-center rounded-2xl bg-blue-600 px-6 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition hover:-translate-y-0.5 hover:bg-blue-700"
                       >
-                        {LISTING_STATUS_OPTIONS.map((item) => (
-                          <option key={item.value} value={item.value}>
-                            {pickText(uiLanguage, { zh: item.zh, en: item.en })}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-semibold text-slate-500">{pickText(uiLanguage, { zh: '店铺名', en: 'Store name' })}</span>
-                      <input
-                        defaultValue={copy.store_name || ''}
-                        onBlur={(event) => {
-                          if (event.currentTarget.value !== (copy.store_name || '')) updateCopy(copy.id, { store_name: event.currentTarget.value })
-                        }}
-                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
-                        placeholder={pickText(uiLanguage, { zh: '例如：Shopee MY 店铺 A', en: 'For example: Shopee MY Store A' })}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-semibold text-slate-500">{pickText(uiLanguage, { zh: '上品时间', en: 'Listed time' })}</span>
-                      <input
-                        type="datetime-local"
-                        defaultValue={copy.listed_at ? new Date(copy.listed_at).toISOString().slice(0, 16) : ''}
-                        onBlur={(event) => updateCopy(copy.id, { listed_at: event.currentTarget.value ? new Date(event.currentTarget.value).toISOString() : null })}
-                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
-                      />
-                    </label>
-                    <button
-                      onClick={() => updateCopy(copy.id, { listing_status: 'listed' })}
-                      className="self-end rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/15 hover:bg-emerald-700"
-                    >
-                      {pickText(uiLanguage, { zh: '快速标记已上品', en: 'Quick mark as listed' })}
-                    </button>
-                    <label className="block md:col-span-2">
-                      <span className="mb-1 block text-xs font-semibold text-slate-500">{pickText(uiLanguage, { zh: '员工备注', en: 'Operator notes' })}</span>
-                      <textarea
-                        rows={3}
-                        defaultValue={copy.operator_note || copy.staff_note || ''}
-                        onBlur={(event) => {
-                          const current = copy.operator_note || copy.staff_note || ''
-                          if (event.currentTarget.value !== current) updateCopy(copy.id, { operator_note: event.currentTarget.value, staff_note: event.currentTarget.value })
-                        }}
-                        placeholder={pickText(uiLanguage, {
-                          zh: '例如：已上到店铺A / 标题需要改短 / 图片3重生后再上架',
-                          en: 'For example: Listed to Store A / shorten the title / relist after image 3 is regenerated',
-                        })}
-                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-700 outline-none focus:border-blue-500"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="mt-4 rounded-2xl border border-slate-200/80 bg-white/70 p-3">
-                    <div className="mb-3 flex items-center justify-between">
-                      <div className="text-sm font-semibold text-slate-900">{pickText(uiLanguage, { zh: '图片任务', en: 'Image tasks' })}</div>
+                        {text.openDetails}
+                      </Link>
                       <button
-                        onClick={() => retryImages({ copy_ids: [copy.id], failed_only: true }, `copy-${copy.id}`)}
-                        disabled={failedImages.length === 0 || busyKey === `copy-${copy.id}`}
-                        className="rounded-xl border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:border-slate-200 disabled:text-slate-300"
+                        type="button"
+                        onClick={() => deleteCopy(copy)}
+                        disabled={busyKey === `delete-${copy.id}`}
+                        className="inline-flex h-10 items-center justify-center rounded-2xl border border-red-200 bg-white px-6 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
                       >
-                        {pickText(uiLanguage, { zh: '重试失败图片', en: 'Retry failed images' })}
+                        {busyKey === `delete-${copy.id}` ? pickText(uiLanguage, { zh: '删除中...', en: 'Deleting...' }) : pickText(uiLanguage, { zh: '删除副本', en: 'Delete copy' })}
                       </button>
                     </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {images.map((image) => {
-                        const note = regenerationNotes[image.id] || ''
-                        return (
-                          <div key={image.id} className="rounded-xl border border-slate-200/80 bg-slate-50/80 p-3">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-xs font-semibold text-slate-700">{image.prompt_number}. {image.prompt_role}</span>
-                              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${image.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : image.status === 'failed' ? 'bg-red-50 text-red-700' : image.pending_storage_path ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>{imageStatusText(image, uiLanguage)}</span>
-                            </div>
-
-                            {(image.output_storage_path || image.pending_storage_path) && (
-                              <div className="mt-3 grid grid-cols-2 gap-2">
-                                <div>
-                                  <div className="mb-1 text-[11px] font-semibold text-slate-500">{pickText(uiLanguage, { zh: '当前图', en: 'Current image' })}</div>
-                                  <div className="relative aspect-square overflow-hidden rounded-lg bg-white ring-1 ring-slate-200">
-                                    {image.output_storage_path ? (
-                                      <StorageImage
-                                        bucket="outputs"
-                                        storagePath={image.output_storage_path}
-                                        initialSrc={imageUrls[image.output_storage_path]}
-                                        alt={pickText(uiLanguage, { zh: '\u5f53\u524d\u56fe', en: 'Current image' })}
-                                        fill
-                                        className="h-full w-full object-cover"
-                                      />
-                                    ) : <div className="flex h-full items-center justify-center text-xs text-slate-400">{pickText(uiLanguage, { zh: '暂无', en: 'Empty' })}</div>}
-                                  </div>
-                                </div>
-                                <div>
-                                  <div className="mb-1 text-[11px] font-semibold text-amber-600">{pickText(uiLanguage, { zh: '待确认新图', en: 'Pending image' })}</div>
-                                  <div className="relative aspect-square overflow-hidden rounded-lg bg-white ring-1 ring-amber-200">
-                                    {image.pending_storage_path ? (
-                                      <StorageImage
-                                        bucket="outputs"
-                                        storagePath={image.pending_storage_path}
-                                        initialSrc={imageUrls[image.pending_storage_path]}
-                                        alt={pickText(uiLanguage, { zh: '\u5f85\u786e\u8ba4\u65b0\u56fe', en: 'Pending image' })}
-                                        fill
-                                        className="h-full w-full object-cover"
-                                      />
-                                    ) : <div className="flex h-full items-center justify-center text-xs text-slate-400">{pickText(uiLanguage, { zh: '\u672a\u751f\u6210', en: 'Not generated' })}</div>}
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-
-                            {image.pending_storage_path && (
-                              <div className="mt-2 grid grid-cols-2 gap-2">
-                                <button
-                                  onClick={() => confirmPendingImage(image.id, 'accept')}
-                                  disabled={busyKey === `accept-${image.id}`}
-                                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-300"
-                                >
-                                  {pickText(uiLanguage, { zh: '保留新图', en: 'Keep new image' })}
-                                </button>
-                                <button
-                                  onClick={() => confirmPendingImage(image.id, 'discard')}
-                                  disabled={busyKey === `discard-${image.id}`}
-                                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:text-slate-300"
-                                >
-                                  {pickText(uiLanguage, { zh: '恢复旧图', en: 'Restore old image' })}
-                                </button>
-                              </div>
-                            )}
-
-                            {image.error_message && <p className="mt-2 text-xs leading-5 text-red-600">{image.error_message}</p>}
-
-                            <div className="mt-3 space-y-2">
-                              <div className="flex flex-wrap gap-1.5">
-                                {REGENERATION_PRESETS.map((preset) => (
-                                  <button
-                                    key={preset.zh}
-                                    type="button"
-                                    onClick={() => setRegenerationNotes((previous) => ({ ...previous, [image.id]: appendPreset(previous[image.id] || '', pickText(uiLanguage, preset)) }))}
-                                    className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200 hover:bg-blue-50 hover:text-blue-700"
-                                  >
-                                    {pickText(uiLanguage, preset)}
-                                  </button>
-                                ))}
-                              </div>
-                              <textarea
-                                value={note}
-                                onChange={(event) => setRegenerationNotes((previous) => ({ ...previous, [image.id]: event.target.value }))}
-                                rows={2}
-                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs leading-5 outline-none focus:border-blue-500"
-                                placeholder={pickText(uiLanguage, {
-                                  zh: '本次重生要求，例如：背景更干净，不要改包装，产品文字更清晰',
-                                  en: 'Regeneration notes, for example: cleaner background, keep packaging unchanged, make text sharper',
-                                })}
-                              />
-                              <button
-                                onClick={() => retryImages({ image_ids: [image.id], failed_only: false, regeneration_note: note }, `image-${image.id}`)}
-                                disabled={busyKey === `image-${image.id}`}
-                                className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100 disabled:text-slate-300"
-                              >
-                                {busyKey === `image-${image.id}` ? pickText(uiLanguage, { zh: '排队中...', en: 'Queued...' }) : pickText(uiLanguage, { zh: '只重生这一张', en: 'Regenerate only this image' })}
-                              </button>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex items-center justify-between gap-3">
-                    <span className="text-xs text-slate-400">
-                      {savingCopyId === copy.id ? text.saving : text.operator(copy.operator_email || text.unrecorded)}
-                    </span>
-                    <Link href={`/product-outputs/${copy.id}`} className="text-sm font-semibold text-slate-900 hover:text-blue-700">
-                      {text.openDetails}
-                    </Link>
                   </div>
                 </article>
               )

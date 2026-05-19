@@ -47,6 +47,11 @@ export default function AuthorizedEmailsPage() {
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
+      if (process.env.NEXT_PUBLIC_APP_EDITION === 'resume') {
+        router.replace('/')
+        return
+      }
+
       const userEmail = data.user?.email || null
       if (!data.user) {
         router.replace('/login')

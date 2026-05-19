@@ -7,6 +7,7 @@ import { AI_ACCESS_ERROR, getGenerationAccess } from '@/lib/generation-access'
 import { getWorkspaceContext, getWorkspaceSupabase } from '@/lib/workspace'
 import { analyzeProductCopyQuality } from '@/lib/product-quality'
 import { isSeoKeywordRule, parseSeoKeywordBank, type SeoKeywordBank } from '@/lib/seo-keywords'
+import { isResumeEdition } from '@/lib/app-edition'
 import {
   SHOPEE_CATEGORY_ATTRIBUTE_KEY,
   decodeShopeeCategorySelection,
@@ -57,6 +58,10 @@ async function getImageApiKey(
     .maybeSingle()
 
   const stored = parseStoredGeminiSettings(settings?.gemini_api_key_encrypted)
+  if (isResumeEdition()) {
+    return stored.apiKey || readBuiltinGeminiApiKey() || null
+  }
+
   const admin = isAdminEmail(userEmail)
   const emailAuthorized = await isBuiltinKeyEmailAuthorized(userEmail)
   const passwordVerified = Boolean(settings?.use_builtin_key && settings?.builtin_key_password_verified)
