@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import { apiFetch } from '@/lib/api'
-import { isAdminEmail, isPrimaryAdminEmail } from '@/lib/admin'
+import { isAdminEmail, isProtectedAdminEmail } from '@/lib/admin'
 import { supabase } from '@/lib/supabase'
 
 type Authorization = {
@@ -176,7 +176,7 @@ export default function AuthorizedEmailsPage() {
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-gray-950">员工登录授权管理</h2>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-gray-500">
             只有这里处于“已授权”的邮箱才能注册、登录和使用公司站。删除邮箱会同时取消授权；
-            员工离职后建议直接删除。主账号 links358p@gmail.com 是最高权限账号，不能被取消授权或删除。
+            员工离职后建议直接删除。受保护账号不能被取消授权或删除。
           </p>
         </div>
 
@@ -229,14 +229,14 @@ export default function AuthorizedEmailsPage() {
             </thead>
             <tbody className="divide-y divide-gray-100 bg-white">
               {authorizations.map((item) => {
-                const primary = isPrimaryAdminEmail(item.email)
+                const protectedAdmin = isProtectedAdminEmail(item.email)
                 const disabled = pendingId === item.id
 
                 return (
                   <tr key={item.id}>
                     <td className="px-4 py-4 text-sm font-semibold text-gray-900">
                       <div>{item.email}</div>
-                      {primary && <div className="mt-1 text-xs font-medium text-blue-600">最高权限主账号</div>}
+                      {protectedAdmin && <div className="mt-1 text-xs font-medium text-blue-600">受保护账号</div>}
                     </td>
                     <td className="px-4 py-4">
                       <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
@@ -261,7 +261,7 @@ export default function AuthorizedEmailsPage() {
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex justify-end gap-2">
-                        {primary ? (
+                        {protectedAdmin ? (
                           <span className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
                             受保护
                           </span>
@@ -282,7 +282,7 @@ export default function AuthorizedEmailsPage() {
                             恢复授权
                           </button>
                         )}
-                        {!primary && (
+                        {!protectedAdmin && (
                           <button
                             onClick={() => handleDelete(item)}
                             disabled={disabled}

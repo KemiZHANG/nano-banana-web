@@ -10,6 +10,7 @@ import {
 } from '@/lib/prompt-generator-skill'
 import { AI_ACCESS_ERROR, getGenerationAccess } from '@/lib/generation-access'
 import { getWorkspaceContext, getWorkspaceSupabase } from '@/lib/workspace'
+import { ensurePromptDistinct, isPromptTooSimilar } from '@/lib/prompt-similarity'
 import { normalizeProductImageRole } from '@/lib/types'
 
 function extractText(response: unknown) {
@@ -116,33 +117,67 @@ export async function POST(request: NextRequest) {
     existingPrompts,
   })
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${PROMPT_GENERATOR_MODEL}:generateContent?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: buildPromptGeneratorInstruction() }],
-      },
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: userPrompt }],
+  async function requestPrompt(promptText: string, temperature: number) {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${PROMPT_GENERATOR_MODEL}:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: buildPromptGeneratorInstruction() }],
         },
-      ],
-      generationConfig: {
-        temperature: 0.82,
-        maxOutputTokens: 1800,
-      },
-    }),
-  })
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: promptText }],
+          },
+        ],
+        generationConfig: {
+          temperature,
+          maxOutputTokens: 1800,
+        },
+      }),
+    })
 
-  if (!response.ok) {
-    return NextResponse.json({
-      error: `Gemini prompt generation failed: ${await response.text()}`,
-    }, { status: response.status })
+    if (!response.ok) {
+      return {
+        text: '',
+        error: `Gemini prompt generation failed: ${await response.text()}`,
+        status: response.status,
+      }
+    }
+
+    return {
+      text: cleanGeneratedPrompt(extractText(await response.json())),
+      error: '',
+      status: 200,
+    }
   }
 
-  const generatedText = cleanGeneratedPrompt(extractText(await response.json()))
+  const firstAttempt = await requestPrompt(userPrompt, 0.82)
+  if (firstAttempt.error) {
+    return NextResponse.json({ error: firstAttempt.error }, { status: firstAttempt.status })
+  }
+
+  let generatedText = firstAttempt.text
+  if (generatedText && normalizedRole && isPromptTooSimilar(generatedText, existingPrompts)) {
+    const retryPrompt = [
+      userPrompt,
+      'The previous attempt was too similar to an existing prompt. Generate a new version with a clearly different composition angle, background material, model/scene structure, lighting direction, and detail layout while keeping all product-fidelity rules unchanged.',
+      `Previous too-similar attempt: ${generatedText}`,
+    ].join('\n\n')
+    const secondAttempt = await requestPrompt(retryPrompt, 0.92)
+    if (secondAttempt.text) generatedText = secondAttempt.text
+  }
+
+  if (generatedText && normalizedRole) {
+    generatedText = ensurePromptDistinct({
+      prompt: generatedText,
+      existingPrompts,
+      role: normalizedRole,
+      variantSeed: existingPrompts.length + 1,
+    })
+  }
+
   if (!generatedText) {
     return NextResponse.json({ error: 'Gemini did not return a prompt.' }, { status: 502 })
   }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAdminEmail, isPrimaryAdminEmail } from '@/lib/admin'
+import { isAdminEmail, isProtectedAdminEmail } from '@/lib/admin'
 import { getAuthorizedUser } from '@/lib/app-auth'
 import { getServerSupabase } from '@/lib/supabase'
 import { isResumeEdition } from '@/lib/app-edition'
@@ -55,8 +55,8 @@ export async function PATCH(
     return NextResponse.json({ error: existingError.message }, { status: 500 })
   }
 
-  if (isPrimaryAdminEmail(existing.email) && updateData.active === false) {
-    return NextResponse.json({ error: 'Primary admin cannot be revoked.' }, { status: 403 })
+  if (isProtectedAdminEmail(existing.email) && updateData.active === false) {
+    return NextResponse.json({ error: 'Protected admin cannot be revoked.' }, { status: 403 })
   }
 
   const { data, error } = await supabase
@@ -91,8 +91,8 @@ export async function DELETE(
     return NextResponse.json({ error: existingError.message }, { status: 500 })
   }
 
-  if (isPrimaryAdminEmail(existing.email)) {
-    return NextResponse.json({ error: 'Primary admin cannot be deleted.' }, { status: 403 })
+  if (isProtectedAdminEmail(existing.email)) {
+    return NextResponse.json({ error: 'Protected admin cannot be deleted.' }, { status: 403 })
   }
 
   const { error } = await supabase

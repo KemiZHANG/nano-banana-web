@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceContext, getWorkspaceSupabase } from '@/lib/workspace'
 import { buildSynchronizedCategoryPrompt } from '@/lib/category-prompt-sync'
 import { getPromptRoleFromRow } from '@/lib/category-prompts'
+import { ensurePromptDistinct } from '@/lib/prompt-similarity'
 import { normalizeProductImageRole, type ProductImageRole } from '@/lib/types'
 
 type CategoryRow = {
@@ -25,16 +26,21 @@ async function insertPrompt(
   supabase: ReturnType<typeof getWorkspaceSupabase>,
   categoryId: string,
   promptRole: string,
-  promptText: string
+  promptText: string,
+  knownPrompts?: PromptRow[]
 ) {
-  const { data: existingPrompts, error: readError } = await supabase
-    .from('category_prompts')
-    .select('prompt_number')
-    .eq('category_id', categoryId)
-    .order('prompt_number', { ascending: true })
+  let existingPrompts = knownPrompts || null
+  if (!existingPrompts) {
+    const { data, error: readError } = await supabase
+      .from('category_prompts')
+      .select('prompt_number,prompt_role,prompt_text')
+      .eq('category_id', categoryId)
+      .order('prompt_number', { ascending: true })
 
-  if (readError) {
-    return { data: null, error: readError }
+    if (readError) {
+      return { data: null, error: readError }
+    }
+    existingPrompts = data || []
   }
 
   return supabase
@@ -93,17 +99,24 @@ async function syncPromptToOtherCategories(input: {
       .map((prompt) => prompt.prompt_text || '')
       .filter(Boolean)
 
+    const promptText = buildSynchronizedCategoryPrompt({
+      role,
+      sourcePrompt,
+      sourceCategory,
+      targetCategory: category,
+      existingPrompts: sameRolePrompts,
+      variantIndex: sameRolePrompts.length,
+    })
+
     return {
       category_id: category.id,
       prompt_number: nextPromptNumber(existingPrompts),
       prompt_role: role,
-      prompt_text: buildSynchronizedCategoryPrompt({
-        role,
-        sourcePrompt,
-        sourceCategory,
-        targetCategory: category,
+      prompt_text: ensurePromptDistinct({
+        prompt: promptText,
         existingPrompts: sameRolePrompts,
-        variantIndex: sameRolePrompts.length,
+        role,
+        variantSeed: sameRolePrompts.length + 1,
       }),
     }
   })
@@ -144,7 +157,33 @@ export async function POST(request: NextRequest) {
 
   const normalizedRole = normalizeProductImageRole(rawPromptRole)
   const promptRole = normalizedRole || rawPromptRole || 'custom'
-  const { data, error } = await insertPrompt(supabase, categoryId, promptRole, promptText)
+
+  const { data: existingPrompts, error: promptReadError } = await supabase
+    .from('category_prompts')
+    .select('prompt_number,prompt_role,prompt_text')
+    .eq('category_id', categoryId)
+    .order('prompt_number', { ascending: true })
+
+  if (promptReadError) {
+    return NextResponse.json({ error: promptReadError.message }, { status: 500 })
+  }
+
+  const sameRolePrompts = normalizedRole
+    ? (existingPrompts || [])
+        .filter((prompt) => getPromptRoleFromRow(prompt) === normalizedRole)
+        .map((prompt) => prompt.prompt_text || '')
+        .filter(Boolean)
+    : []
+  const finalPromptText = normalizedRole
+    ? ensurePromptDistinct({
+        prompt: promptText,
+        existingPrompts: sameRolePrompts,
+        role: normalizedRole,
+        variantSeed: sameRolePrompts.length + 1,
+      })
+    : promptText
+
+  const { data, error } = await insertPrompt(supabase, categoryId, promptRole, finalPromptText, existingPrompts || [])
 
   if (error || !data) {
     return NextResponse.json({ error: error?.message || 'Failed to create prompt' }, { status: 500 })
@@ -156,7 +195,7 @@ export async function POST(request: NextRequest) {
       supabase,
       workspaceKey,
       sourceCategory: category,
-      sourcePrompt: promptText,
+      sourcePrompt: finalPromptText,
       role: normalizedRole,
     })
     if (syncResult.error) {

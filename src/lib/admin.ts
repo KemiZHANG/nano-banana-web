@@ -9,6 +9,7 @@ export const PRIMARY_ADMIN_EMAILS = ['links358p@gmail.com']
 export const SECONDARY_ADMIN_EMAILS = ['irenephang220@gmail.com']
 
 export const ADMIN_EMAILS = [...PRIMARY_ADMIN_EMAILS, ...SECONDARY_ADMIN_EMAILS]
+export const PROTECTED_ADMIN_EMAILS = [...PRIMARY_ADMIN_EMAILS, ...SECONDARY_ADMIN_EMAILS]
 
 export function isAdminEmail(email: string | null | undefined) {
   return ADMIN_EMAILS.includes(normalizeEmail(email))
@@ -16,6 +17,10 @@ export function isAdminEmail(email: string | null | undefined) {
 
 export function isPrimaryAdminEmail(email: string | null | undefined) {
   return PRIMARY_ADMIN_EMAILS.includes(normalizeEmail(email))
+}
+
+export function isProtectedAdminEmail(email: string | null | undefined) {
+  return PROTECTED_ADMIN_EMAILS.includes(normalizeEmail(email))
 }
 
 export function isSecondaryAdminEmail(email: string | null | undefined) {

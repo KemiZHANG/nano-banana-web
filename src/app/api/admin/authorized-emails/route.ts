@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAdminEmail, normalizeEmail } from '@/lib/admin'
+import { isAdminEmail, normalizeEmail, PROTECTED_ADMIN_EMAILS } from '@/lib/admin'
 import { getAuthorizedUser } from '@/lib/app-auth'
 import { getServerSupabase } from '@/lib/supabase'
 import { isResumeEdition } from '@/lib/app-edition'
@@ -32,6 +32,45 @@ export async function GET(request: NextRequest) {
   if (response) return response
 
   const supabase = getServerSupabase()
+
+  const { error: protectUpdateError } = await supabase
+    .from('builtin_key_authorizations')
+    .update({ active: true, revoked_at: null })
+    .in('email', PROTECTED_ADMIN_EMAILS)
+
+  if (protectUpdateError && tableMissingError(protectUpdateError)) {
+    return NextResponse.json({
+      error: 'Authorization table is not installed. Run supabase/builtin_key_authorizations.sql in Supabase SQL Editor.',
+      migrationRequired: true,
+    }, { status: 500 })
+  }
+
+  const { data: protectedRows, error: protectedReadError } = await supabase
+    .from('builtin_key_authorizations')
+    .select('email')
+    .in('email', PROTECTED_ADMIN_EMAILS)
+
+  if (protectedReadError && tableMissingError(protectedReadError)) {
+    return NextResponse.json({
+      error: 'Authorization table is not installed. Run supabase/builtin_key_authorizations.sql in Supabase SQL Editor.',
+      migrationRequired: true,
+    }, { status: 500 })
+  }
+
+  const existingProtected = new Set((protectedRows || []).map((row) => normalizeEmail(row.email)))
+  const missingProtected = PROTECTED_ADMIN_EMAILS.filter((email) => !existingProtected.has(email))
+
+  if (missingProtected.length > 0) {
+    await supabase.from('builtin_key_authorizations').insert(
+      missingProtected.map((email) => ({
+        email,
+        note: 'Protected admin',
+        active: true,
+        revoked_at: null,
+      }))
+    )
+  }
+
   const { data, error } = await supabase
     .from('builtin_key_authorizations')
     .select('*')
