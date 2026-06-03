@@ -48,6 +48,12 @@ export default function LoginPage() {
         en: 'Authentication service is temporarily misconfigured.',
       })
     }
+    if (lower.includes('fetch failed') || lower.includes('failed to fetch') || lower.includes('networkerror')) {
+      return pickText(language, {
+        zh: '认证服务连接失败，请稍后再试。如果一直失败，可能是 Supabase 项目被暂停或环境变量失效。',
+        en: 'Authentication service is unreachable. Please try again later.',
+      })
+    }
     return message
   }
 
@@ -75,11 +81,19 @@ export default function LoginPage() {
   }
 
   useEffect(() => {
-    if (
-      brand.edition === 'company' &&
-      typeof window !== 'undefined' &&
-      new URLSearchParams(window.location.search).get('reason') === 'unauthorized'
-    ) {
+    const reason = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('reason')
+      : null
+
+    if (reason === 'service_unavailable') {
+      setError(pickText(language, {
+        zh: '认证服务暂时连接失败，请稍后刷新再试。如果一直失败，可能是 Supabase 项目被暂停。',
+        en: 'Authentication service is temporarily unreachable. Please refresh and try again later.',
+      }))
+      return
+    }
+
+    if (reason === 'unauthorized') {
       setError(pickText(language, {
         zh: '这个账号当前没有授权，请联系管理员恢复权限。',
         en: 'This account is no longer authorized. Ask the primary admin to restore access.',

@@ -3,6 +3,8 @@
 import { supabase } from './supabase'
 
 export const UNAUTHORIZED_LOGIN_REASON = 'unauthorized'
+export const SERVICE_UNAVAILABLE_LOGIN_REASON = 'service_unavailable'
+const ACCESS_CHECK_TIMEOUT_MS = 10000
 
 export async function readJsonSafely(response: Response) {
   const text = await response.text()
@@ -16,10 +18,28 @@ export async function readJsonSafely(response: Response) {
 }
 
 export async function fetchAccessStatus(accessToken: string) {
-  const response = await fetch('/api/auth/access', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    cache: 'no-store',
-  })
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), ACCESS_CHECK_TIMEOUT_MS)
+
+  let response: Response
+  try {
+    response = await fetch('/api/auth/access', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      error: error instanceof DOMException && error.name === 'AbortError'
+        ? '认证服务响应超时，请稍后再试。'
+        : '认证服务连接失败，请稍后再试。',
+    }
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+
   const payload = await readJsonSafely(response)
 
   return {
